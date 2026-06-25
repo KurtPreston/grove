@@ -79,6 +79,10 @@ The webhook payload is a loose contract `{host, path, name}` consumed by a
 companion workstation listener (e.g. [docent](https://github.com/KurtPreston/docent)),
 which opens/focuses a remote editor at `host:path`.
 
+If `GROVE_WEBHOOK_TOKEN` is set, both webhook recipes add an
+`Authorization: Bearer <token>` header so the listener can require a shared
+secret (docent does, when its own token is configured).
+
 ### Writing your own recipe
 
 Drop an executable `grove-recipe-foo` on your `PATH`. grove invokes it with the
@@ -126,6 +130,7 @@ $CODE_HOME/myproj/
 | `GROVE_PALETTE` | built-in | Override the branch color palette (space/comma-separated hex) |
 | `GROVE_WEBHOOK_URL` | — | Target URL for the `webhook` recipe |
 | `GROVE_WEBHOOK_PORT` | `39787` | Port for `ssh-source-webhook` |
+| `GROVE_WEBHOOK_TOKEN` | — | Shared secret sent as `Authorization: Bearer` on webhook POSTs |
 | `GROVE_SSH_HOST` | — | Remote-SSH host alias embedded in webhook payloads |
 
 ## tmux theming

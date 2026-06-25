@@ -36,6 +36,7 @@ var (
 	palette        []string
 	webhookURL     string
 	webhookPort    string
+	webhookToken   string
 	sshHost        string
 	inSSH          bool
 )
@@ -87,6 +88,7 @@ func loadConfig() {
 	palette = color.ParsePalette(os.Getenv("GROVE_PALETTE"))
 	webhookURL = os.Getenv("GROVE_WEBHOOK_URL")
 	webhookPort = getenv("GROVE_WEBHOOK_PORT", "39787")
+	webhookToken = os.Getenv("GROVE_WEBHOOK_TOKEN")
 	sshHost = os.Getenv("GROVE_SSH_HOST")
 	inSSH = os.Getenv("SSH_CONNECTION") != ""
 }
@@ -386,6 +388,7 @@ func buildContext(p *project.Project, branch, dir string) recipe.Context {
 		TmuxLayout:    tmuxLayout,
 		WebhookURL:    webhookURL,
 		WebhookPort:   webhookPort,
+		WebhookToken:  webhookToken,
 	}
 }
 
@@ -506,6 +509,7 @@ Environment:
   GROVE_PALETTE       Override the branch color palette (space/comma-separated hex)
   GROVE_WEBHOOK_URL   Target URL for the 'webhook' recipe
   GROVE_WEBHOOK_PORT  Port for 'ssh-source-webhook' (default: 39787)
+  GROVE_WEBHOOK_TOKEN Shared secret sent as 'Authorization: Bearer' to docent (optional)
   GROVE_SSH_HOST      Remote-SSH host alias embedded in webhook payloads
 `)
 }

@@ -45,6 +45,9 @@ func postWorkspace(url string, ctx recipe.Context) error {
 		return err
 	}
 	req.Header.Set("Content-Type", "application/json")
+	if ctx.WebhookToken != "" {
+		req.Header.Set("Authorization", "Bearer "+ctx.WebhookToken)
+	}
 
 	client := &http.Client{Timeout: 5 * time.Second}
 	resp, err := client.Do(req)
