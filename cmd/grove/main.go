@@ -35,7 +35,6 @@ var (
 	copyFiles      []string
 	palette        []string
 	webhookURL     string
-	webhookPort    string
 	webhookToken   string
 	sshHost        string
 	inSSH          bool
@@ -87,7 +86,6 @@ func loadConfig() {
 	copyFiles = splitColon(getenv("GROVE_COPY", ".env"))
 	palette = color.ParsePalette(os.Getenv("GROVE_PALETTE"))
 	webhookURL = os.Getenv("GROVE_WEBHOOK_URL")
-	webhookPort = getenv("GROVE_WEBHOOK_PORT", "39787")
 	webhookToken = os.Getenv("GROVE_WEBHOOK_TOKEN")
 	sshHost = os.Getenv("GROVE_SSH_HOST")
 	inSSH = os.Getenv("SSH_CONNECTION") != ""
@@ -387,7 +385,6 @@ func buildContext(p *project.Project, branch, dir string) recipe.Context {
 		InSSH:         inSSH,
 		TmuxLayout:    tmuxLayout,
 		WebhookURL:    webhookURL,
-		WebhookPort:   webhookPort,
 		WebhookToken:  webhookToken,
 	}
 }
@@ -499,7 +496,7 @@ Usage:
   grove help                     Show this help
 
 Recipes drive the dev environment for a branch. Built-ins: tmux, vscode-color-config,
-webhook, ssh-source-webhook. Anything else resolves to grove-recipe-<name> on PATH.
+webhook. Anything else resolves to grove-recipe-<name> on PATH.
 
 Environment:
   CODE_HOME           Base dir for new projects (default: ~/Code)
@@ -507,8 +504,7 @@ Environment:
   GROVE_TMUX_LAYOUT   tmux panes as name=cmd,name=cmd (default: shell=,claude=claude)
   GROVE_COPY          Colon-separated untracked files copied into new worktrees (default: .env)
   GROVE_PALETTE       Override the branch color palette (space/comma-separated hex)
-  GROVE_WEBHOOK_URL   Target URL for the 'webhook' recipe
-  GROVE_WEBHOOK_PORT  Port for 'ssh-source-webhook' (default: 39787)
+  GROVE_WEBHOOK_URL   Target URL for the 'webhook' recipe (e.g. http://127.0.0.1:39787/open via a reverse SSH tunnel)
   GROVE_WEBHOOK_TOKEN Shared secret sent as 'Authorization: Bearer' to docent (optional)
   GROVE_SSH_HOST      Remote-SSH host alias embedded in webhook payloads
 `)

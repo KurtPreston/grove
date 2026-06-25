@@ -73,13 +73,17 @@ Built-in recipes:
 | `tmux` | Ensures a per-project tmux session with one window per worktree (colored), one pane per `GROVE_TMUX_LAYOUT` entry, then attaches/switches |
 | `vscode-color-config` | Writes the branch color into the worktree's `.vscode/settings.json` (shared by VSCode and Cursor) and keeps it out of `git status` |
 | `webhook` | POSTs `{host, path, name}` as JSON to `GROVE_WEBHOOK_URL` |
-| `ssh-source-webhook` | When inside an SSH session, POSTs `{host, path, name}` to `http://127.0.0.1:$GROVE_WEBHOOK_PORT/open` — intended to reach a listener on the machine you SSH'd in from via a reverse SSH tunnel |
 
 The webhook payload is a loose contract `{host, path, name}` consumed by a
 companion workstation listener (e.g. [docent](https://github.com/KurtPreston/docent)),
 which opens/focuses a remote editor at `host:path`.
 
-If `GROVE_WEBHOOK_TOKEN` is set, both webhook recipes add an
+For the remote (SSH) flow, point `GROVE_WEBHOOK_URL` at the reverse-tunnel
+endpoint — e.g. `http://127.0.0.1:39787/open` — which a reverse SSH tunnel
+(`RemoteForward 39787 127.0.0.1:39787`) forwards to docent on the machine you
+SSH'd in from.
+
+If `GROVE_WEBHOOK_TOKEN` is set, the `webhook` recipe adds an
 `Authorization: Bearer <token>` header so the listener can require a shared
 secret (docent does, when its own token is configured).
 
@@ -101,13 +105,14 @@ following environment:
 
 ## Example: remote workflow
 
-With `GROVE_RECIPES="ssh-source-webhook,vscode-color-config"` and a reverse SSH
-tunnel from your workstation (`RemoteForward 39787 127.0.0.1:39787`):
+With `GROVE_RECIPES="webhook,vscode-color-config"`,
+`GROVE_WEBHOOK_URL="http://127.0.0.1:39787/open"`, and a reverse SSH tunnel from
+your workstation (`RemoteForward 39787 127.0.0.1:39787`):
 
 1. You're SSH'd into your dev box. In `~/Code/myproj` you type `wt feature/x`.
 2. grove creates (or reuses) the `feature-x` worktree and `cd`s you in.
 3. `vscode-color-config` writes the branch color into `.vscode/settings.json`.
-4. `ssh-source-webhook` POSTs `{host, path, name}` back through the tunnel; your
+4. `webhook` POSTs `{host, path, name}` back through the tunnel; your
    workstation listener opens/focuses a remote Cursor window on that path.
 
 ## Project layout created by `grove clone URL myproj`
@@ -128,8 +133,7 @@ $CODE_HOME/myproj/
 | `GROVE_TMUX_LAYOUT` | `shell=,claude=claude` | tmux panes as `name=cmd` pairs, left-to-right (empty cmd = plain shell) |
 | `GROVE_COPY` | `.env` | Colon-separated untracked files copied into new worktrees |
 | `GROVE_PALETTE` | built-in | Override the branch color palette (space/comma-separated hex) |
-| `GROVE_WEBHOOK_URL` | — | Target URL for the `webhook` recipe |
-| `GROVE_WEBHOOK_PORT` | `39787` | Port for `ssh-source-webhook` |
+| `GROVE_WEBHOOK_URL` | — | Target URL for the `webhook` recipe (e.g. `http://127.0.0.1:39787/open` via a reverse SSH tunnel) |
 | `GROVE_WEBHOOK_TOKEN` | — | Shared secret sent as `Authorization: Bearer` on webhook POSTs |
 | `GROVE_SSH_HOST` | — | Remote-SSH host alias embedded in webhook payloads |
 

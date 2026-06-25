@@ -30,7 +30,6 @@ type Context struct {
 	// Recipe-specific configuration sourced from the environment.
 	TmuxLayout   string
 	WebhookURL   string
-	WebhookPort  string
 	WebhookToken string
 }
 

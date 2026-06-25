@@ -14,11 +14,16 @@ import (
 
 func init() { recipe.Register("webhook", webhookRecipe) }
 
-// webhookRecipe POSTs the workspace descriptor to a fixed URL (GROVE_WEBHOOK_URL).
+// webhookRecipe POSTs the workspace descriptor to GROVE_WEBHOOK_URL. For the
+// remote (SSH) flow, point GROVE_WEBHOOK_URL at the reverse-tunnel endpoint,
+// e.g. http://127.0.0.1:39787/open, which forwards to docent on your workstation.
 func webhookRecipe(ctx recipe.Context) error {
 	if ctx.WebhookURL == "" {
 		ui.Warn("webhook: GROVE_WEBHOOK_URL is not set; skipping.")
 		return nil
+	}
+	if ctx.SSHHost == "" {
+		ui.Warn("webhook: GROVE_SSH_HOST not set; docent won't know which host to open.")
 	}
 	return postWorkspace(ctx.WebhookURL, ctx)
 }
