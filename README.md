@@ -45,7 +45,7 @@ echo 'source "/path/to/grove/shell/grove.fish"' >> ~/.config/fish/config.fish
 
 | Command | Description |
 |---------|-------------|
-| `grove clone GIT_URL [FOLDER]` | Clone a repo as a bare `.base` plus a worktree for the default branch under `$CODE_HOME/FOLDER` |
+| `grove clone GIT_URL [FOLDER]` | Clone a repo as a bare `.base` plus a worktree for the default branch under `FOLDER` in the current directory |
 | `grove BRANCH` | Switch to (or create) BRANCH's worktree and run `GROVE_RECIPES` |
 | `grove open [BRANCH] [RECIPES]` | Open BRANCH (or the current worktree's branch if omitted/`.`) and run RECIPES (defaults to `GROVE_RECIPES`) |
 | `grove switch [BRANCH]` | Like a bare BRANCH; with no branch and `fzf` installed, opens a picker |
@@ -164,7 +164,7 @@ your workstation (`RemoteForward 39787 127.0.0.1:39787`):
 ## Project layout created by `grove clone URL myproj`
 
 ```
-$CODE_HOME/myproj/
+./myproj/
 ├── .base/          # bare repo (shared object store) for all worktrees
 ├── main/           # worktree for the default branch
 └── feature-x/      # worktree for branch feature/x  ('/' -> '-' in the dir name)
@@ -174,7 +174,6 @@ $CODE_HOME/myproj/
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `CODE_HOME` | `~/Code` | Base directory for new projects |
 | `GROVE_RECIPES` | `tmux` | Comma-separated recipes run by open/switch |
 | `GROVE_TMUX_LAYOUT` | `shell=,claude=claude` | tmux panes as `name=cmd` pairs, left-to-right (empty cmd = plain shell) |
 | `GROVE_COPY` | `.env` | Colon-separated untracked files copied into new worktrees |

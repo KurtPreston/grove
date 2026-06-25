@@ -16,7 +16,6 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"strings"
 
 	"grove/internal/color"
@@ -29,7 +28,6 @@ import (
 
 // Runtime configuration sourced from the environment (populated in main).
 var (
-	codeHome       string
 	recipesDefault string
 	tmuxLayout     string
 	copyFiles      []string
@@ -79,8 +77,6 @@ func main() {
 }
 
 func loadConfig() {
-	home, _ := os.UserHomeDir()
-	codeHome = getenv("CODE_HOME", filepath.Join(home, "Code"))
 	recipesDefault = getenv("GROVE_RECIPES", "tmux")
 	tmuxLayout = getenv("GROVE_TMUX_LAYOUT", "shell=,claude=claude")
 	copyFiles = splitColon(getenv("GROVE_COPY", ".env"))
@@ -104,7 +100,7 @@ func cmdClone(args []string) {
 	if len(args) >= 2 {
 		folder = args[1]
 	}
-	p, dir, branch, err := project.Clone(url, folder, codeHome, copyFiles)
+	p, dir, branch, err := project.Clone(url, folder, copyFiles)
 	if err != nil {
 		ui.Die(err.Error())
 	}
@@ -484,7 +480,7 @@ func usage() {
 	fmt.Fprint(os.Stderr, `grove - branch-centric worktree + workflow launcher (alias: wt)
 
 Usage:
-  grove clone GIT_URL [FOLDER]   Clone a repo as a bare .base + default worktree
+  grove clone GIT_URL [FOLDER]   Clone a repo (under FOLDER in the current dir) as a bare .base + default worktree
   grove BRANCH                   Switch to (or create) BRANCH's worktree; run GROVE_RECIPES
   grove open [BRANCH] [RECIPES]  Open BRANCH (or current) and run RECIPES (default: GROVE_RECIPES)
   grove switch [BRANCH]          Like a bare BRANCH; no BRANCH opens an fzf picker
@@ -503,7 +499,6 @@ The bootstrap recipe runs per-project setup once on new worktrees (commands from
 GROVE_BOOTSTRAP or a .grove/bootstrap script). Put it before tmux in GROVE_RECIPES.
 
 Environment:
-  CODE_HOME             Base dir for new projects (default: ~/Code)
   GROVE_RECIPES         Comma-separated recipes for open/switch (default: tmux)
   GROVE_TMUX_LAYOUT     tmux panes as name=cmd,name=cmd (default: shell=,claude=claude)
   GROVE_COPY            Colon-separated untracked files copied into new worktrees (default: .env)

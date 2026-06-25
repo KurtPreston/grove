@@ -230,14 +230,19 @@ func (p *Project) EnsureWorktree(branch string, copyFiles []string) (string, boo
 	return dir, true, nil
 }
 
-// Clone creates a new project: a bare .base plus a worktree for the default branch.
-func Clone(url, folder, codeHome string, copyFiles []string) (proj *Project, dir, branch string, err error) {
+// Clone creates a new project: a bare .base plus a worktree for the default
+// branch. A relative folder is resolved against the current working directory.
+func Clone(url, folder string, copyFiles []string) (proj *Project, dir, branch string, err error) {
 	if folder == "" {
 		folder = strings.TrimSuffix(filepath.Base(url), ".git")
 	}
 	dest := folder
 	if !filepath.IsAbs(dest) {
-		dest = filepath.Join(codeHome, folder)
+		wd, err := os.Getwd()
+		if err != nil {
+			return nil, "", "", err
+		}
+		dest = filepath.Join(wd, folder)
 	}
 	if pathExists(dest) {
 		return nil, "", "", fmt.Errorf("%s already exists", dest)
