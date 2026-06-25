@@ -73,6 +73,51 @@ Built-in recipes:
 | `tmux` | Ensures a per-project tmux session with one window per worktree (colored), one pane per `GROVE_TMUX_LAYOUT` entry, then attaches/switches |
 | `vscode-color-config` | Writes the branch color into the worktree's `.vscode/settings.json` (shared by VSCode and Cursor) and keeps it out of `git status` |
 | `webhook` | POSTs `{host, path, name}` as JSON to `GROVE_WEBHOOK_URL` |
+| `bootstrap` | Runs per-project setup (e.g. `nvm use && yarn install && yarn build`) **once**, the first time a worktree is created |
+
+### `bootstrap`: per-project setup on new worktrees
+
+The `bootstrap` recipe runs project-specific setup commands the **first time a
+worktree is created** (a no-op when you re-open an existing one). It is safe to
+leave in `GROVE_RECIPES` globally: projects without bootstrap commands are
+skipped silently.
+
+Put `bootstrap` *before* `tmux` in `GROVE_RECIPES` so it runs before tmux takes
+over the terminal:
+
+```sh
+export GROVE_RECIPES="bootstrap,vscode-color-config,tmux"
+```
+
+Then define the commands for a project in one of these places (first match wins):
+
+| Source | When to use |
+|--------|-------------|
+| `GROVE_BOOTSTRAP` env var | Inline commands, e.g. set per-project via direnv |
+| `<worktree>/.grove/bootstrap` | A script committed to the repo (shared with the team) |
+| `<project>/.grove/bootstrap` | A machine-local script applied to every worktree (not committed) |
+
+For your `~/Code/salsa` example, create a machine-local script that applies to
+every new worktree without touching the repo:
+
+```sh
+mkdir -p ~/Code/salsa/.grove
+cat > ~/Code/salsa/.grove/bootstrap <<'EOF'
+nvm use
+yarn install
+yarn build
+EOF
+```
+
+Now `wt some-branch` inside `salsa` creates the worktree and runs those commands
+in it once. Notes:
+
+- Commands run in the **new worktree directory** through a **login shell**
+  (`bash -l` by default) so your shell environment is sourced — that is what
+  makes shell functions like `nvm use` work in a non-interactive run. Override
+  the interpreter with `GROVE_BOOTSTRAP_SHELL` (e.g. `zsh`).
+- To re-run bootstrap on a worktree that already exists, set
+  `GROVE_BOOTSTRAP_FORCE=1` for that invocation.
 
 The webhook payload is a loose contract `{host, path, name}` consumed by a
 companion workstation listener (e.g. [docent](https://github.com/KurtPreston/docent)),
@@ -102,6 +147,7 @@ following environment:
 | `GROVE_DEFAULT_BRANCH` | the repo's default branch |
 | `GROVE_SSH_HOST` | configured Remote-SSH host alias (for webhooks) |
 | `GROVE_IN_SSH` | `1` when running inside an SSH session |
+| `GROVE_CREATED` | `1` when the worktree was created on this invocation (vs. reopened) |
 
 ## Example: remote workflow
 
@@ -132,6 +178,9 @@ $CODE_HOME/myproj/
 | `GROVE_RECIPES` | `tmux` | Comma-separated recipes run by open/switch |
 | `GROVE_TMUX_LAYOUT` | `shell=,claude=claude` | tmux panes as `name=cmd` pairs, left-to-right (empty cmd = plain shell) |
 | `GROVE_COPY` | `.env` | Colon-separated untracked files copied into new worktrees |
+| `GROVE_BOOTSTRAP` | — | Inline commands for the `bootstrap` recipe (overrides the `.grove/bootstrap` script) |
+| `GROVE_BOOTSTRAP_SHELL` | `bash` | Login shell used to run bootstrap commands |
+| `GROVE_BOOTSTRAP_FORCE` | — | When set, run `bootstrap` even on an already-existing worktree |
 | `GROVE_PALETTE` | built-in | Override the branch color palette (space/comma-separated hex) |
 | `GROVE_WEBHOOK_URL` | — | Target URL for the `webhook` recipe (e.g. `http://127.0.0.1:39787/open` via a reverse SSH tunnel) |
 | `GROVE_WEBHOOK_TOKEN` | — | Shared secret sent as `Authorization: Bearer` on webhook POSTs |

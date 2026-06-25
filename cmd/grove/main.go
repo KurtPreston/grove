@@ -109,7 +109,7 @@ func cmdClone(args []string) {
 		ui.Die(err.Error())
 	}
 	emitCD(dir)
-	recipe.Run(recipe.Parse(recipesDefault), buildContext(p, branch, dir))
+	recipe.Run(recipe.Parse(recipesDefault), buildContext(p, branch, dir, true))
 }
 
 // cmdOpen: grove open [BRANCH] [RECIPES]. BRANCH omitted or "." infers the
@@ -155,7 +155,7 @@ func cmdSwitch(args []string) {
 }
 
 func doOpen(p *project.Project, branch, recipesArg string) {
-	dir, err := p.EnsureWorktree(branch, copyFiles)
+	dir, created, err := p.EnsureWorktree(branch, copyFiles)
 	if err != nil {
 		ui.Die(err.Error())
 	}
@@ -164,7 +164,7 @@ func doOpen(p *project.Project, branch, recipesArg string) {
 	if names == "" {
 		names = recipesDefault
 	}
-	recipe.Run(recipe.Parse(names), buildContext(p, branch, dir))
+	recipe.Run(recipe.Parse(names), buildContext(p, branch, dir, created))
 }
 
 // cmdPath: resolve (creating if needed) BRANCH's worktree; print path to stdout.
@@ -174,7 +174,7 @@ func cmdPath(args []string) {
 		ui.Die("usage: grove path BRANCH")
 	}
 	branch := trimSlash(args[0])
-	dir, err := p.EnsureWorktree(branch, copyFiles)
+	dir, _, err := p.EnsureWorktree(branch, copyFiles)
 	if err != nil {
 		ui.Die(err.Error())
 	}
@@ -370,7 +370,7 @@ func cmdColor(args []string) {
 // Helpers
 // ---------------------------------------------------------------------------
 
-func buildContext(p *project.Project, branch, dir string) recipe.Context {
+func buildContext(p *project.Project, branch, dir string, created bool) recipe.Context {
 	hex := color.ForBranch(branch, palette)
 	return recipe.Context{
 		Branch:        branch,
@@ -383,6 +383,7 @@ func buildContext(p *project.Project, branch, dir string) recipe.Context {
 		DefaultBranch: p.DefaultBranch(),
 		SSHHost:       sshHost,
 		InSSH:         inSSH,
+		Created:       created,
 		TmuxLayout:    tmuxLayout,
 		WebhookURL:    webhookURL,
 		WebhookToken:  webhookToken,
@@ -496,13 +497,19 @@ Usage:
   grove help                     Show this help
 
 Recipes drive the dev environment for a branch. Built-ins: tmux, vscode-color-config,
-webhook. Anything else resolves to grove-recipe-<name> on PATH.
+webhook, bootstrap. Anything else resolves to grove-recipe-<name> on PATH.
+
+The bootstrap recipe runs per-project setup once on new worktrees (commands from
+GROVE_BOOTSTRAP or a .grove/bootstrap script). Put it before tmux in GROVE_RECIPES.
 
 Environment:
-  CODE_HOME           Base dir for new projects (default: ~/Code)
-  GROVE_RECIPES       Comma-separated recipes for open/switch (default: tmux)
-  GROVE_TMUX_LAYOUT   tmux panes as name=cmd,name=cmd (default: shell=,claude=claude)
-  GROVE_COPY          Colon-separated untracked files copied into new worktrees (default: .env)
+  CODE_HOME             Base dir for new projects (default: ~/Code)
+  GROVE_RECIPES         Comma-separated recipes for open/switch (default: tmux)
+  GROVE_TMUX_LAYOUT     tmux panes as name=cmd,name=cmd (default: shell=,claude=claude)
+  GROVE_COPY            Colon-separated untracked files copied into new worktrees (default: .env)
+  GROVE_BOOTSTRAP       Inline commands for the bootstrap recipe (else .grove/bootstrap)
+  GROVE_BOOTSTRAP_SHELL Login shell used to run bootstrap commands (default: bash)
+  GROVE_BOOTSTRAP_FORCE Run bootstrap even on an existing worktree
   GROVE_PALETTE       Override the branch color palette (space/comma-separated hex)
   GROVE_WEBHOOK_URL   Target URL for the 'webhook' recipe (e.g. http://127.0.0.1:39787/open via a reverse SSH tunnel)
   GROVE_WEBHOOK_TOKEN Shared secret sent as 'Authorization: Bearer' to docent (optional)

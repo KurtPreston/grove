@@ -175,8 +175,10 @@ func (p *Project) WorktreePathFor(branch string) (string, bool) {
 
 // EnsureWorktree returns the worktree dir for branch, creating it off the latest
 // default branch if needed. copyFiles are untracked files copied from the
-// default-branch worktree into freshly created ones.
-func (p *Project) EnsureWorktree(branch string, copyFiles []string) (string, error) {
+// default-branch worktree into freshly created ones. The returned bool reports
+// whether the worktree was created on this call (vs. reused), so callers can
+// drive one-time bootstrap behavior.
+func (p *Project) EnsureWorktree(branch string, copyFiles []string) (string, bool, error) {
 	if dir, ok := p.WorktreePathFor(branch); ok {
 		ui.Info("Using existing worktree: " + dir)
 		if GitQuiet(dir, "pull", "--ff-only") {
@@ -184,7 +186,7 @@ func (p *Project) EnsureWorktree(branch string, copyFiles []string) (string, err
 		} else {
 			ui.Warn("skipped pull (no upstream or not fast-forward).")
 		}
-		return dir, nil
+		return dir, false, nil
 	}
 
 	ui.Info("Fetching latest...")
@@ -195,19 +197,19 @@ func (p *Project) EnsureWorktree(branch string, copyFiles []string) (string, err
 	def := p.DefaultBranch()
 	dir := filepath.Join(p.Dir, Sanitize(branch))
 	if pathExists(dir) {
-		return "", fmt.Errorf("%s already exists but is not a worktree for '%s'", dir, branch)
+		return "", false, fmt.Errorf("%s already exists but is not a worktree for '%s'", dir, branch)
 	}
 
 	switch {
 	case GitQuiet(p.Base, "show-ref", "--verify", "--quiet", "refs/heads/"+branch):
 		ui.Info(fmt.Sprintf("Creating worktree for existing local branch '%s' at %s", branch, dir))
 		if err := Git(p.Base, "worktree", "add", dir, branch); err != nil {
-			return "", fmt.Errorf("worktree add failed")
+			return "", false, fmt.Errorf("worktree add failed")
 		}
 	case GitQuiet(p.Base, "show-ref", "--verify", "--quiet", "refs/remotes/origin/"+branch):
 		ui.Info(fmt.Sprintf("Creating worktree tracking origin/%s at %s", branch, dir))
 		if err := Git(p.Base, "worktree", "add", "--track", "-b", branch, dir, "origin/"+branch); err != nil {
-			return "", fmt.Errorf("worktree add failed")
+			return "", false, fmt.Errorf("worktree add failed")
 		}
 	default:
 		baseRef := def
@@ -218,14 +220,14 @@ func (p *Project) EnsureWorktree(branch string, copyFiles []string) (string, err
 		// --no-track so autoSetupMerge doesn't point upstream at the base ref; we
 		// then track the same-named branch so a plain push/pull targets origin/<branch>.
 		if err := Git(p.Base, "worktree", "add", "--no-track", "-b", branch, dir, baseRef); err != nil {
-			return "", fmt.Errorf("worktree add failed")
+			return "", false, fmt.Errorf("worktree add failed")
 		}
 		_ = Git(p.Base, "config", "branch."+branch+".remote", "origin")
 		_ = Git(p.Base, "config", "branch."+branch+".merge", "refs/heads/"+branch)
 	}
 
 	p.setupWorktree(dir, copyFiles)
-	return dir, nil
+	return dir, true, nil
 }
 
 // Clone creates a new project: a bare .base plus a worktree for the default branch.

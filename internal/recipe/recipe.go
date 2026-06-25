@@ -27,6 +27,11 @@ type Context struct {
 	SSHHost       string
 	InSSH         bool
 
+	// Created reports whether the worktree was created on this invocation (vs.
+	// an existing one being reopened). Recipes like bootstrap use it to run
+	// one-time setup only on fresh worktrees.
+	Created bool
+
 	// Recipe-specific configuration sourced from the environment.
 	TmuxLayout   string
 	WebhookURL   string
@@ -41,6 +46,10 @@ func (c Context) Env() []string {
 	if c.InSSH {
 		inSSH = "1"
 	}
+	created := ""
+	if c.Created {
+		created = "1"
+	}
 	for _, kv := range [][2]string{
 		{"GROVE_BRANCH", c.Branch},
 		{"GROVE_DIR", c.Dir},
@@ -52,6 +61,7 @@ func (c Context) Env() []string {
 		{"GROVE_DEFAULT_BRANCH", c.DefaultBranch},
 		{"GROVE_SSH_HOST", c.SSHHost},
 		{"GROVE_IN_SSH", inSSH},
+		{"GROVE_CREATED", created},
 	} {
 		e = append(e, kv[0]+"="+kv[1])
 	}
