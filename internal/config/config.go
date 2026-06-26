@@ -38,9 +38,6 @@ const starter = `{
 // are not specific to a single recipe; everything else lives on the per-recipe
 // entries in Recipes.
 type Config struct {
-	// Palette overrides the branch color palette (hex values). Empty means use
-	// the built-in default palette.
-	Palette []string `json:"palette,omitempty"`
 	// Copy lists untracked files copied from the default-branch worktree into
 	// freshly created worktrees.
 	Copy []string `json:"copy,omitempty"`
@@ -68,8 +65,7 @@ type RecipeConfig struct {
 }
 
 // Defaults returns the configuration used when no grove.json is present: a
-// single tmux recipe and the conventional .env copy. An empty palette lets the
-// color package fall back to its built-in default.
+// single tmux recipe and the conventional .env copy.
 func Defaults() Config {
 	return Config{
 		Copy:    []string{".env"},

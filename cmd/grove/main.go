@@ -103,7 +103,7 @@ func cmdClone(args []string) {
 	}
 	cfg := loadCfg(p)
 	emitCD(dir)
-	recipe.Run(cfg.Recipes, buildContext(p, branch, dir, true, false, cfg.Palette))
+	recipe.Run(cfg.Recipes, buildContext(p, branch, dir, true, false))
 }
 
 // cmdOpen: grove open [BRANCH] [RECIPES] [--force]. BRANCH omitted or "." infers
@@ -159,7 +159,7 @@ func doOpen(p *project.Project, branch, filter string, force bool) {
 		ui.Die(err.Error())
 	}
 	emitCD(dir)
-	recipe.Run(filterRecipes(cfg.Recipes, filter), buildContext(p, branch, dir, created, force, cfg.Palette))
+	recipe.Run(filterRecipes(cfg.Recipes, filter), buildContext(p, branch, dir, created, force))
 }
 
 // filterRecipes restricts recipes to those whose type appears in the
@@ -227,7 +227,7 @@ func cmdTmux() {
 		if w.Bare || w.Branch == "" {
 			continue
 		}
-		hex := color.ForBranch(w.Branch, cfg.Palette)
+		hex := color.ForBranch(w.Branch)
 		tmux.EnsureWorktreeWindow(session, project.Sanitize(w.Branch), w.Path, hex, color.FgForHex(hex), layout)
 	}
 	tmux.KillPlaceholder(session)
@@ -251,7 +251,6 @@ func cmdList(args []string) {
 		listPorcelain(p)
 		return
 	}
-	palette := loadCfg(p).Palette
 	wts, _ := p.Worktrees()
 	fmt.Fprintf(os.Stderr, "%sProject:%s %s  %s(%s)%s\n",
 		ui.Bold, ui.Reset, p.Name(), ui.Dim, p.Dir, ui.Reset)
@@ -260,7 +259,7 @@ func cmdList(args []string) {
 		if w.Bare {
 			continue
 		}
-		printRow(p, session, w, palette)
+		printRow(p, session, w)
 	}
 }
 
@@ -274,12 +273,12 @@ func listPorcelain(p *project.Project) {
 	}
 }
 
-func printRow(p *project.Project, session string, w project.Worktree, palette []string) {
+func printRow(p *project.Project, session string, w project.Worktree) {
 	branch := w.Branch
 	if branch == "" {
 		branch = "(no branch)"
 	}
-	hex := color.ForBranch(branch, palette)
+	hex := color.ForBranch(branch)
 	sw := color.Swatch(hex)
 
 	tmuxMark := ui.Dim + " -- " + ui.Reset
@@ -298,7 +297,6 @@ func printRow(p *project.Project, session string, w project.Worktree, palette []
 
 func cmdPrune() {
 	p := mustResolve()
-	palette := loadCfg(p).Palette
 	def := p.DefaultBranch()
 	ui.Info("Fetching and pruning remotes...")
 	p.Prune()
@@ -320,7 +318,7 @@ func cmdPrune() {
 	ui.Log("The following worktrees are merged or gone (branch refs are kept):")
 	for _, c := range candidates {
 		fmt.Fprintf(os.Stderr, "  %s %-28s %s%s%s\n",
-			color.Swatch(color.ForBranch(c.branch, palette)), c.branch, ui.Dim, c.path, ui.Reset)
+			color.Swatch(color.ForBranch(c.branch)), c.branch, ui.Dim, c.path, ui.Reset)
 	}
 	fmt.Fprint(os.Stderr, "Remove these worktree directories? [y/N] ")
 	if !readYes() {
@@ -408,12 +406,7 @@ func cmdColor(args []string) {
 	if len(args) < 1 {
 		ui.Die("usage: grove color BRANCH")
 	}
-	// Use the project's palette when inside one; otherwise the default palette.
-	var palette []string
-	if p, err := project.Resolve(mustGetwd()); err == nil {
-		palette = loadCfg(p).Palette
-	}
-	hex := color.ForBranch(args[0], palette)
+	hex := color.ForBranch(args[0])
 	fmt.Printf("%s %s\n", color.Swatch(hex), hex)
 }
 
@@ -421,8 +414,8 @@ func cmdColor(args []string) {
 // Helpers
 // ---------------------------------------------------------------------------
 
-func buildContext(p *project.Project, branch, dir string, created, force bool, palette []string) recipe.Context {
-	hex := color.ForBranch(branch, palette)
+func buildContext(p *project.Project, branch, dir string, created, force bool) recipe.Context {
+	hex := color.ForBranch(branch)
 	return recipe.Context{
 		Branch:        branch,
 		Dir:           dir,
@@ -533,7 +526,8 @@ Configuration lives in grove.json at the project root (beside .base), validated 
 grove.schema.json. It declares an ordered "recipes" array; each entry has a "type"
 plus that type's settings. Built-in types: tmux, vscode-color-config, webhook,
 bootstrap. Any other type resolves to grove-recipe-<type> on PATH (settings exported
-as GROVE_RECIPE_*). Top-level "palette" and "copy" tune colors and copied files.
+as GROVE_RECIPE_*). The top-level "copy" array tunes which files are copied.
+Branch colors are derived automatically from a hash of the branch name.
 'grove clone' seeds a starter grove.json.
 `)
 }

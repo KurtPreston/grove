@@ -1,22 +1,24 @@
 // Package color assigns a deterministic, terminal-friendly color to a branch and
-// derives a readable foreground for it. The branch->color mapping intentionally
-// matches the original bash `wt` (which hashed with POSIX `cksum`), so colors
-// stay stable across the rewrite.
+// derives a readable foreground for it. A branch name is hashed (POSIX `cksum`,
+// matching the original bash `wt`) into a hue on the OKLCH color wheel, which
+// spreads branches across the full hue circle to minimize color collisions.
 package color
 
 import (
 	"fmt"
+	"math"
 	"strconv"
 	"strings"
 )
 
-// DefaultPalette is a curated, visually distinct set of hues. Override per
-// project via the "palette" array in grove.json.
-var DefaultPalette = []string{
-	"#3b82f6", "#ef4444", "#22c55e", "#eab308",
-	"#a855f7", "#ec4899", "#14b8a6", "#f97316",
-	"#6366f1", "#84cc16", "#06b6d4", "#f43f5e",
-}
+// branchLightness and branchChroma are the fixed OKLCH lightness and chroma used
+// when generating a branch color from its hashed hue. They are tuned to stay
+// (mostly) within the sRGB gamut across all hues while remaining vivid and
+// legible as terminal backgrounds.
+const (
+	branchLightness = 0.70
+	branchChroma    = 0.14
+)
 
 var crctab [256]uint32
 
@@ -48,13 +50,58 @@ func cksum(data []byte) uint32 {
 	return ^crc
 }
 
-// ForBranch returns the palette color assigned to a branch name.
-func ForBranch(branch string, palette []string) string {
-	if len(palette) == 0 {
-		palette = DefaultPalette
+// ForBranch returns the color assigned to a branch name: the branch hash is
+// mapped to an OKLCH hue and rendered to an sRGB hex string, avoiding the
+// collisions inherent in a small flat palette.
+func ForBranch(branch string) string {
+	hue := float64(cksum([]byte(branch)) % 360)
+	return oklch(branchLightness, branchChroma, hue)
+}
+
+// oklch converts an OKLCH color (lightness l in [0,1], chroma c, hue h in
+// degrees) to an sRGB hex string, clamping any out-of-gamut channels.
+func oklch(l, c, hDeg float64) string {
+	h := hDeg * math.Pi / 180
+	a := c * math.Cos(h)
+	b := c * math.Sin(h)
+
+	// OKLab -> linear sRGB (Björn Ottosson's coefficients).
+	lp := l + 0.3963377774*a + 0.2158037573*b
+	mp := l - 0.1055613458*a - 0.0638541728*b
+	sp := l - 0.0894841775*a - 1.2914855480*b
+
+	lc := lp * lp * lp
+	mc := mp * mp * mp
+	sc := sp * sp * sp
+
+	r := 4.0767416621*lc - 3.3077115913*mc + 0.2309699292*sc
+	g := -1.2684380046*lc + 2.6097574011*mc - 0.3413193965*sc
+	bl := -0.0041960863*lc - 0.7034186147*mc + 1.7076147010*sc
+
+	return fmt.Sprintf("#%02x%02x%02x", linearToByte(r), linearToByte(g), linearToByte(bl))
+}
+
+// linearToByte applies the sRGB transfer function to a linear channel and clamps
+// the result to a 0-255 byte.
+func linearToByte(c float64) int {
+	switch {
+	case c <= 0:
+		return 0
+	case c >= 1:
+		return 255
+	case c <= 0.0031308:
+		c = 12.92 * c
+	default:
+		c = 1.055*math.Pow(c, 1.0/2.4) - 0.055
 	}
-	idx := int(cksum([]byte(branch)) % uint32(len(palette)))
-	return palette[idx]
+	v := int(math.Round(c * 255))
+	if v < 0 {
+		return 0
+	}
+	if v > 255 {
+		return 255
+	}
+	return v
 }
 
 func rgb(hex string) (int, int, int) {

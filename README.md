@@ -180,7 +180,6 @@ autocomplete and inline validation.
 ```json
 {
   "$schema": "https://raw.githubusercontent.com/KurtPreston/grove/main/grove.schema.json",
-  "palette": ["#3b82f6", "#ef4444", "#22c55e"],
   "copy": [".env"],
   "recipes": [
     { "type": "bootstrap", "command": "nvm use && yarn install && yarn build" },
@@ -193,7 +192,6 @@ autocomplete and inline validation.
 
 | Key | Default | Description |
 |-----|---------|-------------|
-| `palette` | built-in | Branch color palette (array of hex values) |
 | `copy` | `[".env"]` | Untracked files copied from the default-branch worktree into new worktrees |
 | `recipes` | `[{ "type": "tmux" }]` | Ordered recipes run on open/switch (see [Recipes](#recipes)) |
 

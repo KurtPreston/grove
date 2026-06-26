@@ -10,14 +10,6 @@
       "type": "string",
       "description": "Reference to this JSON Schema (for editor validation)."
     },
-    "palette": {
-      "type": "array",
-      "description": "Branch color palette as hex values. Empty/omitted uses grove's built-in palette.",
-      "items": {
-        "type": "string",
-        "pattern": "^#?[0-9a-fA-F]{6}$"
-      }
-    },
     "copy": {
       "type": "array",
       "description": "Untracked files copied from the default-branch worktree into freshly created worktrees.",
