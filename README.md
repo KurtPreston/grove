@@ -16,7 +16,8 @@ Responsibilities are deliberately separated:
 2. **Metadata** — a stable color assigned to each branch.
 3. **Recipes** — trigger a development environment / side effect for the branch.
 
-(1) and (2) are core; (3) is configurable via `GROVE_RECIPES`.
+(1) and (2) are core; (3) is configured in a per-project `grove.json` (see
+[Configuration](#configuration)).
 
 ## Install
 
@@ -45,9 +46,9 @@ echo 'source "/path/to/grove/shell/grove.fish"' >> ~/.config/fish/config.fish
 
 | Command | Description |
 |---------|-------------|
-| `grove clone GIT_URL [FOLDER]` | Clone a repo as a bare `.base` plus a worktree for the default branch under `FOLDER` in the current directory |
-| `grove BRANCH` | Switch to (or create) BRANCH's worktree and run `GROVE_RECIPES` |
-| `grove open [BRANCH] [RECIPES]` | Open BRANCH (or the current worktree's branch if omitted/`.`) and run RECIPES (defaults to `GROVE_RECIPES`) |
+| `grove clone GIT_URL [FOLDER]` | Clone a repo as a bare `.base` plus a worktree for the default branch under `FOLDER` in the current directory, and seed a starter `grove.json` |
+| `grove BRANCH` | Switch to (or create) BRANCH's worktree and run the recipes in `grove.json` |
+| `grove open [BRANCH] [TYPES] [--force]` | Open BRANCH (or the current worktree's branch if omitted/`.`); `TYPES` (comma-separated) filters the configured recipes to those types; `--force` re-runs one-time recipes |
 | `grove switch [BRANCH]` | Like a bare BRANCH; with no branch and `fzf` installed, opens a picker |
 | `grove path BRANCH` | Resolve (creating if needed) BRANCH's worktree and print its absolute path to stdout |
 | `grove tmux` | Attach the project's tmux session, building a window for every worktree |
@@ -62,80 +63,68 @@ status/log output goes to stderr), so external tooling can drive grove over SSH.
 
 ## Recipes
 
-When you open a branch, grove runs the recipes in `GROVE_RECIPES` (or the ones you
-pass as the second argument to `grove open`). A recipe is either **built-in** or an
-external executable named `grove-recipe-<name>` found on your `PATH`.
+When you open a branch, grove runs the recipes declared in the project's
+`grove.json` (see [Configuration](#configuration)), in order. Each recipe entry
+has a `type` plus that type's settings. A recipe is either **built-in** or an
+external executable named `grove-recipe-<type>` found on your `PATH`.
 
 Built-in recipes:
 
-| Recipe | What it does |
-|--------|--------------|
-| `tmux` | Ensures a per-project tmux session with one window per worktree (colored), one pane per `GROVE_TMUX_LAYOUT` entry, then attaches/switches |
-| `vscode-color-config` | Writes the branch color into the worktree's `.vscode/settings.json` (shared by VSCode and Cursor) and keeps it out of `git status` |
-| `webhook` | POSTs `{host, path, name}` as JSON to `GROVE_WEBHOOK_URL` |
-| `bootstrap` | Runs per-project setup (e.g. `nvm use && yarn install && yarn build`) **once**, the first time a worktree is created |
+| Recipe | Settings | What it does |
+|--------|----------|--------------|
+| `tmux` | `layout` | Ensures a per-project tmux session with one window per worktree (colored), one pane per `layout` entry, then attaches/switches |
+| `vscode-color-config` | — | Writes the branch color into the worktree's `.vscode/settings.json` (shared by VSCode and Cursor) and keeps it out of `git status` |
+| `webhook` | `url`, `token`, `sshHost` | POSTs `{host, path, name}` as JSON to `url` |
+| `bootstrap` | `command`, `shell` | Runs `command` (e.g. `nvm use && yarn install && yarn build`) **once**, the first time a worktree is created |
 
 ### `bootstrap`: per-project setup on new worktrees
 
-The `bootstrap` recipe runs project-specific setup commands the **first time a
-worktree is created** (a no-op when you re-open an existing one). It is safe to
-leave in `GROVE_RECIPES` globally: projects without bootstrap commands are
-skipped silently.
+The `bootstrap` recipe runs its `command` the **first time a worktree is
+created** (a no-op when you re-open an existing one, and a no-op when no
+`command` is set). Put `bootstrap` *before* `tmux` in the recipes array so it
+runs before tmux takes over the terminal:
 
-Put `bootstrap` *before* `tmux` in `GROVE_RECIPES` so it runs before tmux takes
-over the terminal:
-
-```sh
-export GROVE_RECIPES="bootstrap,vscode-color-config,tmux"
+```json
+{
+  "recipes": [
+    { "type": "bootstrap", "command": "nvm use && yarn install && yarn build" },
+    { "type": "vscode-color-config" },
+    { "type": "tmux" }
+  ]
+}
 ```
 
-Then define the commands for a project in one of these places (first match wins):
-
-| Source | When to use |
-|--------|-------------|
-| `GROVE_BOOTSTRAP` env var | Inline commands, e.g. set per-project via direnv |
-| `<worktree>/.grove/bootstrap` | A script committed to the repo (shared with the team) |
-| `<project>/.grove/bootstrap` | A machine-local script applied to every worktree (not committed) |
-
-For your `~/Code/salsa` example, create a machine-local script that applies to
-every new worktree without touching the repo:
-
-```sh
-mkdir -p ~/Code/salsa/.grove
-cat > ~/Code/salsa/.grove/bootstrap <<'EOF'
-nvm use
-yarn install
-yarn build
-EOF
-```
-
-Now `wt some-branch` inside `salsa` creates the worktree and runs those commands
+Now `wt some-branch` in that project creates the worktree and runs the command
 in it once. Notes:
 
-- Commands run in the **new worktree directory** through a **login shell**
+- The command runs in the **new worktree directory** through a **login shell**
   (`bash -l` by default) so your shell environment is sourced — that is what
   makes shell functions like `nvm use` work in a non-interactive run. Override
-  the interpreter with `GROVE_BOOTSTRAP_SHELL` (e.g. `zsh`).
-- To re-run bootstrap on a worktree that already exists, set
-  `GROVE_BOOTSTRAP_FORCE=1` for that invocation.
+  the interpreter with the recipe's `shell` field (e.g. `"shell": "zsh"`).
+- To re-run bootstrap on a worktree that already exists, pass `--force` to
+  `grove open`/`switch`.
+
+### `webhook`: open the worktree on another machine
 
 The webhook payload is a loose contract `{host, path, name}` consumed by a
 companion workstation listener (e.g. [docent](https://github.com/KurtPreston/docent)),
 which opens/focuses a remote editor at `host:path`.
 
-For the remote (SSH) flow, point `GROVE_WEBHOOK_URL` at the reverse-tunnel
+For the remote (SSH) flow, point the recipe's `url` at the reverse-tunnel
 endpoint — e.g. `http://127.0.0.1:39787/open` — which a reverse SSH tunnel
 (`RemoteForward 39787 127.0.0.1:39787`) forwards to docent on the machine you
-SSH'd in from.
+SSH'd in from. Set `sshHost` so docent knows which host to open. If `token` is
+set, the recipe adds an `Authorization: Bearer <token>` header so the listener
+can require a shared secret (docent does, when its own token is configured).
 
-If `GROVE_WEBHOOK_TOKEN` is set, the `webhook` recipe adds an
-`Authorization: Bearer <token>` header so the listener can require a shared
-secret (docent does, when its own token is configured).
+```json
+{ "type": "webhook", "url": "http://127.0.0.1:39787/open", "token": "secret", "sshHost": "devbox" }
+```
 
 ### Writing your own recipe
 
-Drop an executable `grove-recipe-foo` on your `PATH`. grove invokes it with the
-following environment:
+Use a `type` that isn't built in and drop an executable `grove-recipe-<type>` on
+your `PATH`. grove invokes it with the following environment:
 
 | Variable | Meaning |
 |----------|---------|
@@ -145,15 +134,23 @@ following environment:
 | `GROVE_PROJECT` / `GROVE_PROJECT_DIR` | project name and its directory |
 | `GROVE_BASE` | path to the bare `.base` repo |
 | `GROVE_DEFAULT_BRANCH` | the repo's default branch |
-| `GROVE_SSH_HOST` | configured Remote-SSH host alias (for webhooks) |
 | `GROVE_IN_SSH` | `1` when running inside an SSH session |
 | `GROVE_CREATED` | `1` when the worktree was created on this invocation (vs. reopened) |
+| `GROVE_RECIPE_*` | the recipe entry's own fields (`GROVE_RECIPE_URL`, `GROVE_RECIPE_TOKEN`, `GROVE_RECIPE_SSH_HOST`, `GROVE_RECIPE_LAYOUT`, `GROVE_RECIPE_COMMAND`, `GROVE_RECIPE_SHELL`) |
 
 ## Example: remote workflow
 
-With `GROVE_RECIPES="webhook,vscode-color-config"`,
-`GROVE_WEBHOOK_URL="http://127.0.0.1:39787/open"`, and a reverse SSH tunnel from
-your workstation (`RemoteForward 39787 127.0.0.1:39787`):
+With this `grove.json` and a reverse SSH tunnel from your workstation
+(`RemoteForward 39787 127.0.0.1:39787`):
+
+```json
+{
+  "recipes": [
+    { "type": "vscode-color-config" },
+    { "type": "webhook", "url": "http://127.0.0.1:39787/open", "sshHost": "devbox" }
+  ]
+}
+```
 
 1. You're SSH'd into your dev box. In `~/Code/myproj` you type `wt feature/x`.
 2. grove creates (or reuses) the `feature-x` worktree and `cd`s you in.
@@ -166,24 +163,46 @@ your workstation (`RemoteForward 39787 127.0.0.1:39787`):
 ```
 ./myproj/
 ├── .base/          # bare repo (shared object store) for all worktrees
+├── grove.json      # this project's config (machine-local; not committed)
 ├── main/           # worktree for the default branch
 └── feature-x/      # worktree for branch feature/x  ('/' -> '-' in the dir name)
 ```
 
-## Environment
+## Configuration
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `GROVE_RECIPES` | `tmux` | Comma-separated recipes run by open/switch |
-| `GROVE_TMUX_LAYOUT` | `shell=,claude=claude` | tmux panes as `name=cmd` pairs, left-to-right (empty cmd = plain shell) |
-| `GROVE_COPY` | `.env` | Colon-separated untracked files copied into new worktrees |
-| `GROVE_BOOTSTRAP` | — | Inline commands for the `bootstrap` recipe (overrides the `.grove/bootstrap` script) |
-| `GROVE_BOOTSTRAP_SHELL` | `bash` | Login shell used to run bootstrap commands |
-| `GROVE_BOOTSTRAP_FORCE` | — | When set, run `bootstrap` even on an already-existing worktree |
-| `GROVE_PALETTE` | built-in | Override the branch color palette (space/comma-separated hex) |
-| `GROVE_WEBHOOK_URL` | — | Target URL for the `webhook` recipe (e.g. `http://127.0.0.1:39787/open` via a reverse SSH tunnel) |
-| `GROVE_WEBHOOK_TOKEN` | — | Shared secret sent as `Authorization: Bearer` on webhook POSTs |
-| `GROVE_SSH_HOST` | — | Remote-SSH host alias embedded in webhook payloads |
+All configuration lives in a single `grove.json` at the project root, **beside
+`.base`** — not inside a worktree, so it is never committed and can safely hold
+machine-specific values (a webhook token, an SSH host alias). `grove clone`
+seeds a starter file; edit it to taste. It is validated by
+[`grove.schema.json`](grove.schema.json); add a `$schema` reference for editor
+autocomplete and inline validation.
+
+```json
+{
+  "$schema": "https://raw.githubusercontent.com/KurtPreston/grove/main/grove.schema.json",
+  "palette": ["#3b82f6", "#ef4444", "#22c55e"],
+  "copy": [".env"],
+  "recipes": [
+    { "type": "bootstrap", "command": "nvm use && yarn install && yarn build" },
+    { "type": "vscode-color-config" },
+    { "type": "webhook", "url": "http://127.0.0.1:39787/open", "token": "secret", "sshHost": "devbox" },
+    { "type": "tmux", "layout": "shell=,claude=claude" }
+  ]
+}
+```
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `palette` | built-in | Branch color palette (array of hex values) |
+| `copy` | `[".env"]` | Untracked files copied from the default-branch worktree into new worktrees |
+| `recipes` | `[{ "type": "tmux" }]` | Ordered recipes run on open/switch (see [Recipes](#recipes)) |
+
+When `grove.json` is absent grove falls back to these defaults, so a project
+works before you write any config. A malformed file is non-fatal: grove warns
+and uses the defaults.
+
+The only remaining environment input is `GROVE_CD_FILE`, which the shell wrapper
+sets so grove can tell it where to `cd`; it is not user configuration.
 
 ## tmux theming
 

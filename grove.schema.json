@@ -1,0 +1,106 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/KurtPreston/grove/main/grove.schema.json",
+  "title": "grove project configuration",
+  "description": "Machine-local grove.json that lives at a grove project root (beside the bare .base repo). Declares the recipes grove runs when a branch is opened, plus a few cross-recipe settings.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "$schema": {
+      "type": "string",
+      "description": "Reference to this JSON Schema (for editor validation)."
+    },
+    "palette": {
+      "type": "array",
+      "description": "Branch color palette as hex values. Empty/omitted uses grove's built-in palette.",
+      "items": {
+        "type": "string",
+        "pattern": "^#?[0-9a-fA-F]{6}$"
+      }
+    },
+    "copy": {
+      "type": "array",
+      "description": "Untracked files copied from the default-branch worktree into freshly created worktrees.",
+      "items": { "type": "string" }
+    },
+    "recipes": {
+      "type": "array",
+      "description": "Ordered recipes run when a branch is opened.",
+      "items": { "$ref": "#/$defs/recipe" }
+    }
+  },
+  "$defs": {
+    "recipe": {
+      "type": "object",
+      "required": ["type"],
+      "properties": {
+        "type": {
+          "type": "string",
+          "description": "Recipe type. Built-ins: tmux, vscode-color-config, webhook, bootstrap. Any other value resolves to grove-recipe-<type> on PATH."
+        }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "type": { "const": "webhook" } } },
+          "then": {
+            "required": ["url"],
+            "properties": {
+              "type": { "const": "webhook" },
+              "url": {
+                "type": "string",
+                "description": "Target URL, e.g. http://127.0.0.1:39787/open via a reverse SSH tunnel."
+              },
+              "token": {
+                "type": "string",
+                "description": "Shared secret sent as 'Authorization: Bearer <token>'."
+              },
+              "sshHost": {
+                "type": "string",
+                "description": "Remote-SSH host alias embedded in the webhook payload."
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        {
+          "if": { "properties": { "type": { "const": "tmux" } } },
+          "then": {
+            "properties": {
+              "type": { "const": "tmux" },
+              "layout": {
+                "type": "string",
+                "description": "tmux panes as name=cmd pairs, comma-separated (e.g. shell=,claude=claude)."
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        {
+          "if": { "properties": { "type": { "const": "bootstrap" } } },
+          "then": {
+            "required": ["command"],
+            "properties": {
+              "type": { "const": "bootstrap" },
+              "command": {
+                "type": "string",
+                "description": "Setup command run once in a new worktree through a login shell (e.g. nvm use && yarn install)."
+              },
+              "shell": {
+                "type": "string",
+                "description": "Login shell used to run the command (default: bash)."
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        {
+          "if": { "properties": { "type": { "const": "vscode-color-config" } } },
+          "then": {
+            "properties": { "type": { "const": "vscode-color-config" } },
+            "additionalProperties": false
+          }
+        }
+      ]
+    }
+  }
+}

@@ -10,8 +10,8 @@ import (
 	"strings"
 )
 
-// DefaultPalette is a curated, visually distinct set of hues. Override at runtime
-// via GROVE_PALETTE (space- or comma-separated hex values).
+// DefaultPalette is a curated, visually distinct set of hues. Override per
+// project via the "palette" array in grove.json.
 var DefaultPalette = []string{
 	"#3b82f6", "#ef4444", "#22c55e", "#eab308",
 	"#a855f7", "#ec4899", "#14b8a6", "#f97316",
@@ -46,22 +46,6 @@ func cksum(data []byte) uint32 {
 		crc = (crc << 8) ^ crctab[byte(crc>>24)^byte(n)]
 	}
 	return ^crc
-}
-
-// ParsePalette turns a GROVE_PALETTE override into a slice; empty input yields the
-// default palette. Accepts whitespace- and/or comma-separated hex values.
-func ParsePalette(s string) []string {
-	s = strings.TrimSpace(s)
-	if s == "" {
-		return DefaultPalette
-	}
-	fields := strings.FieldsFunc(s, func(r rune) bool {
-		return r == ',' || r == ' ' || r == '\t' || r == '\n'
-	})
-	if len(fields) == 0 {
-		return DefaultPalette
-	}
-	return fields
 }
 
 // ForBranch returns the palette color assigned to a branch name.

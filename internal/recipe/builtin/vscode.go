@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"grove/internal/config"
 	"grove/internal/project"
 	"grove/internal/recipe"
 	"grove/internal/ui"
@@ -15,7 +16,7 @@ func init() { recipe.Register("vscode-color-config", vscodeRecipe) }
 // vscodeRecipe writes the branch color into the worktree's .vscode/settings.json
 // (shared by VSCode and Cursor for workspace-level colorCustomizations) and keeps
 // the generated file out of `git status`.
-func vscodeRecipe(ctx recipe.Context) error {
+func vscodeRecipe(ctx recipe.Context, _ config.RecipeConfig) error {
 	return writeVscodeSettings(ctx.Dir, ctx.Color, ctx.Fg)
 }
 

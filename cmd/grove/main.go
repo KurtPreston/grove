@@ -5,7 +5,7 @@
 //  2. assign each branch a deterministic color,
 //  3. trigger a "recipe" (dev environment / side effect) for the branch.
 //
-// (1) and (2) are core; (3) is pluggable. The default recipe set is GROVE_RECIPES.
+// (1) and (2) are core; (3) is pluggable, configured per project in grove.json.
 //
 // Shell integration: a `grove` shell function (and `wt` alias) sets $GROVE_CD_FILE
 // before calling this binary. When a command should move the caller's shell, we
@@ -19,27 +19,20 @@ import (
 	"strings"
 
 	"grove/internal/color"
+	"grove/internal/config"
 	"grove/internal/project"
 	"grove/internal/recipe"
-	_ "grove/internal/recipe/builtin" // register built-in recipes
+	"grove/internal/recipe/builtin" // register built-in recipes + layout helpers
 	"grove/internal/tmux"
 	"grove/internal/ui"
 )
 
-// Runtime configuration sourced from the environment (populated in main).
-var (
-	recipesDefault string
-	tmuxLayout     string
-	copyFiles      []string
-	palette        []string
-	webhookURL     string
-	webhookToken   string
-	sshHost        string
-	inSSH          bool
-)
+// inSSH is the one piece of runtime state still sourced from the environment:
+// it is set by sshd, not user config. Everything else lives in grove.json.
+var inSSH bool
 
 func main() {
-	loadConfig()
+	inSSH = os.Getenv("SSH_CONNECTION") != ""
 
 	args := os.Args[1:]
 	cmd := ""
@@ -71,20 +64,19 @@ func main() {
 	case "":
 		cmdSwitch(nil)
 	default:
-		// Bare `grove BRANCH`: treat the token as a branch (uses GROVE_RECIPES).
+		// Bare `grove BRANCH`: treat the token as a branch (uses grove.json recipes).
 		cmdSwitch([]string{cmd})
 	}
 }
 
-func loadConfig() {
-	recipesDefault = getenv("GROVE_RECIPES", "tmux")
-	tmuxLayout = getenv("GROVE_TMUX_LAYOUT", "shell=,claude=claude")
-	copyFiles = splitColon(getenv("GROVE_COPY", ".env"))
-	palette = color.ParsePalette(os.Getenv("GROVE_PALETTE"))
-	webhookURL = os.Getenv("GROVE_WEBHOOK_URL")
-	webhookToken = os.Getenv("GROVE_WEBHOOK_TOKEN")
-	sshHost = os.Getenv("GROVE_SSH_HOST")
-	inSSH = os.Getenv("SSH_CONNECTION") != ""
+// loadCfg reads the project's grove.json, warning (and falling back to defaults)
+// on any read/parse error so a malformed file never blocks a command.
+func loadCfg(p *project.Project) config.Config {
+	cfg, err := config.Load(p.Dir)
+	if err != nil {
+		ui.Warn("grove.json: " + err.Error() + "; using defaults.")
+	}
+	return cfg
 }
 
 // ---------------------------------------------------------------------------
@@ -100,25 +92,34 @@ func cmdClone(args []string) {
 	if len(args) >= 2 {
 		folder = args[1]
 	}
-	p, dir, branch, err := project.Clone(url, folder, copyFiles)
+	p, dir, branch, err := project.Clone(url, folder, config.Defaults().Copy)
 	if err != nil {
 		ui.Die(err.Error())
 	}
+	if err := config.Seed(p.Dir); err != nil {
+		ui.Warn("could not write starter grove.json: " + err.Error())
+	} else {
+		ui.Info("Wrote starter " + config.Filename + " (edit it to configure recipes).")
+	}
+	cfg := loadCfg(p)
 	emitCD(dir)
-	recipe.Run(recipe.Parse(recipesDefault), buildContext(p, branch, dir, true))
+	recipe.Run(cfg.Recipes, buildContext(p, branch, dir, true, false, cfg.Palette))
 }
 
-// cmdOpen: grove open [BRANCH] [RECIPES]. BRANCH omitted or "." infers the
-// current worktree's branch; RECIPES omitted falls back to GROVE_RECIPES.
+// cmdOpen: grove open [BRANCH] [RECIPES] [--force]. BRANCH omitted or "." infers
+// the current worktree's branch; RECIPES (a comma-separated list of recipe
+// types) filters grove.json's recipes to only those types. --force re-runs
+// one-time recipes (bootstrap) on an existing worktree.
 func cmdOpen(args []string) {
 	p := mustResolve()
+	args, force := popForce(args)
 	branch := ""
-	recipesArg := ""
+	filter := ""
 	if len(args) >= 1 {
 		branch = trimSlash(args[0])
 	}
 	if len(args) >= 2 {
-		recipesArg = args[1]
+		filter = args[1]
 	}
 	if branch == "" || branch == "." {
 		b, ok := currentBranch(mustGetwd())
@@ -127,12 +128,13 @@ func cmdOpen(args []string) {
 		}
 		branch = b
 	}
-	doOpen(p, branch, recipesArg)
+	doOpen(p, branch, filter, force)
 }
 
-// cmdSwitch: bare grove / grove switch / grove BRANCH. Always uses GROVE_RECIPES.
+// cmdSwitch: bare grove / grove switch / grove BRANCH. Runs grove.json's recipes.
 func cmdSwitch(args []string) {
 	p := mustResolve()
+	args, force := popForce(args)
 	branch := ""
 	if len(args) >= 1 {
 		branch = trimSlash(args[0])
@@ -147,20 +149,53 @@ func cmdSwitch(args []string) {
 			ui.Die("usage: grove BRANCH   (install fzf for an interactive picker)")
 		}
 	}
-	doOpen(p, branch, "")
+	doOpen(p, branch, "", force)
 }
 
-func doOpen(p *project.Project, branch, recipesArg string) {
-	dir, created, err := p.EnsureWorktree(branch, copyFiles)
+func doOpen(p *project.Project, branch, filter string, force bool) {
+	cfg := loadCfg(p)
+	dir, created, err := p.EnsureWorktree(branch, cfg.Copy)
 	if err != nil {
 		ui.Die(err.Error())
 	}
 	emitCD(dir)
-	names := recipesArg
-	if names == "" {
-		names = recipesDefault
+	recipe.Run(filterRecipes(cfg.Recipes, filter), buildContext(p, branch, dir, created, force, cfg.Palette))
+}
+
+// filterRecipes restricts recipes to those whose type appears in the
+// comma-separated csv. An empty csv keeps all recipes.
+func filterRecipes(recipes []config.RecipeConfig, csv string) []config.RecipeConfig {
+	csv = strings.TrimSpace(csv)
+	if csv == "" {
+		return recipes
 	}
-	recipe.Run(recipe.Parse(names), buildContext(p, branch, dir, created))
+	want := map[string]bool{}
+	for _, n := range strings.Split(csv, ",") {
+		if n = strings.TrimSpace(n); n != "" {
+			want[n] = true
+		}
+	}
+	var out []config.RecipeConfig
+	for _, r := range recipes {
+		if want[r.Type] {
+			out = append(out, r)
+		}
+	}
+	return out
+}
+
+// popForce removes --force/-f from args, reporting whether it was present.
+func popForce(args []string) ([]string, bool) {
+	var out []string
+	force := false
+	for _, a := range args {
+		if a == "--force" || a == "-f" {
+			force = true
+			continue
+		}
+		out = append(out, a)
+	}
+	return out, force
 }
 
 // cmdPath: resolve (creating if needed) BRANCH's worktree; print path to stdout.
@@ -170,7 +205,7 @@ func cmdPath(args []string) {
 		ui.Die("usage: grove path BRANCH")
 	}
 	branch := trimSlash(args[0])
-	dir, _, err := p.EnsureWorktree(branch, copyFiles)
+	dir, _, err := p.EnsureWorktree(branch, loadCfg(p).Copy)
 	if err != nil {
 		ui.Die(err.Error())
 	}
@@ -183,6 +218,8 @@ func cmdTmux() {
 	if !tmux.Has() {
 		ui.Die("tmux is not installed.")
 	}
+	cfg := loadCfg(p)
+	layout := tmuxLayout(cfg)
 	session := project.Sanitize(p.Name())
 	tmux.EnsureSession(session, p.Dir)
 	wts, _ := p.Worktrees()
@@ -190,11 +227,22 @@ func cmdTmux() {
 		if w.Bare || w.Branch == "" {
 			continue
 		}
-		hex := color.ForBranch(w.Branch, palette)
-		tmux.EnsureWorktreeWindow(session, project.Sanitize(w.Branch), w.Path, hex, color.FgForHex(hex), tmuxLayout)
+		hex := color.ForBranch(w.Branch, cfg.Palette)
+		tmux.EnsureWorktreeWindow(session, project.Sanitize(w.Branch), w.Path, hex, color.FgForHex(hex), layout)
 	}
 	tmux.KillPlaceholder(session)
 	tmux.AttachOrSwitch(session, project.Sanitize(p.DefaultBranch()))
+}
+
+// tmuxLayout returns the layout from the config's tmux recipe entry, or the
+// built-in default when there is no tmux recipe.
+func tmuxLayout(cfg config.Config) string {
+	for _, r := range cfg.Recipes {
+		if r.Type == "tmux" {
+			return builtin.LayoutOr(r.Layout)
+		}
+	}
+	return builtin.DefaultLayout
 }
 
 func cmdList(args []string) {
@@ -203,6 +251,7 @@ func cmdList(args []string) {
 		listPorcelain(p)
 		return
 	}
+	palette := loadCfg(p).Palette
 	wts, _ := p.Worktrees()
 	fmt.Fprintf(os.Stderr, "%sProject:%s %s  %s(%s)%s\n",
 		ui.Bold, ui.Reset, p.Name(), ui.Dim, p.Dir, ui.Reset)
@@ -211,7 +260,7 @@ func cmdList(args []string) {
 		if w.Bare {
 			continue
 		}
-		printRow(p, session, w)
+		printRow(p, session, w, palette)
 	}
 }
 
@@ -225,7 +274,7 @@ func listPorcelain(p *project.Project) {
 	}
 }
 
-func printRow(p *project.Project, session string, w project.Worktree) {
+func printRow(p *project.Project, session string, w project.Worktree, palette []string) {
 	branch := w.Branch
 	if branch == "" {
 		branch = "(no branch)"
@@ -249,6 +298,7 @@ func printRow(p *project.Project, session string, w project.Worktree) {
 
 func cmdPrune() {
 	p := mustResolve()
+	palette := loadCfg(p).Palette
 	def := p.DefaultBranch()
 	ui.Info("Fetching and pruning remotes...")
 	p.Prune()
@@ -358,6 +408,11 @@ func cmdColor(args []string) {
 	if len(args) < 1 {
 		ui.Die("usage: grove color BRANCH")
 	}
+	// Use the project's palette when inside one; otherwise the default palette.
+	var palette []string
+	if p, err := project.Resolve(mustGetwd()); err == nil {
+		palette = loadCfg(p).Palette
+	}
 	hex := color.ForBranch(args[0], palette)
 	fmt.Printf("%s %s\n", color.Swatch(hex), hex)
 }
@@ -366,7 +421,7 @@ func cmdColor(args []string) {
 // Helpers
 // ---------------------------------------------------------------------------
 
-func buildContext(p *project.Project, branch, dir string, created bool) recipe.Context {
+func buildContext(p *project.Project, branch, dir string, created, force bool, palette []string) recipe.Context {
 	hex := color.ForBranch(branch, palette)
 	return recipe.Context{
 		Branch:        branch,
@@ -377,12 +432,9 @@ func buildContext(p *project.Project, branch, dir string, created bool) recipe.C
 		ProjectDir:    p.Dir,
 		Base:          p.Base,
 		DefaultBranch: p.DefaultBranch(),
-		SSHHost:       sshHost,
 		InSSH:         inSSH,
 		Created:       created,
-		TmuxLayout:    tmuxLayout,
-		WebhookURL:    webhookURL,
-		WebhookToken:  webhookToken,
+		Force:         force,
 	}
 }
 
@@ -446,23 +498,6 @@ func readYes() bool {
 	return strings.HasPrefix(reply, "y")
 }
 
-func getenv(k, def string) string {
-	if v := os.Getenv(k); v != "" {
-		return v
-	}
-	return def
-}
-
-func splitColon(s string) []string {
-	var out []string
-	for _, f := range strings.Split(s, ":") {
-		if f != "" {
-			out = append(out, f)
-		}
-	}
-	return out
-}
-
 // trimSlash drops trailing slashes left by directory tab-completion (e.g. "feat/").
 func trimSlash(s string) string {
 	for strings.HasSuffix(s, "/") {
@@ -481,8 +516,8 @@ func usage() {
 
 Usage:
   grove clone GIT_URL [FOLDER]   Clone a repo (under FOLDER in the current dir) as a bare .base + default worktree
-  grove BRANCH                   Switch to (or create) BRANCH's worktree; run GROVE_RECIPES
-  grove open [BRANCH] [RECIPES]  Open BRANCH (or current) and run RECIPES (default: GROVE_RECIPES)
+  grove BRANCH                   Switch to (or create) BRANCH's worktree; run grove.json recipes
+  grove open [BRANCH] [TYPES]    Open BRANCH (or current); TYPES filters grove.json recipes by type
   grove switch [BRANCH]          Like a bare BRANCH; no BRANCH opens an fzf picker
   grove path BRANCH              Resolve (creating if needed) BRANCH's worktree; print its path
   grove tmux                     Attach the project session, building a window per worktree
@@ -492,22 +527,13 @@ Usage:
   grove color BRANCH             Print the deterministic color for BRANCH
   grove help                     Show this help
 
-Recipes drive the dev environment for a branch. Built-ins: tmux, vscode-color-config,
-webhook, bootstrap. Anything else resolves to grove-recipe-<name> on PATH.
+Pass --force to open/switch to re-run one-time recipes (bootstrap) on an existing worktree.
 
-The bootstrap recipe runs per-project setup once on new worktrees (commands from
-GROVE_BOOTSTRAP or a .grove/bootstrap script). Put it before tmux in GROVE_RECIPES.
-
-Environment:
-  GROVE_RECIPES         Comma-separated recipes for open/switch (default: tmux)
-  GROVE_TMUX_LAYOUT     tmux panes as name=cmd,name=cmd (default: shell=,claude=claude)
-  GROVE_COPY            Colon-separated untracked files copied into new worktrees (default: .env)
-  GROVE_BOOTSTRAP       Inline commands for the bootstrap recipe (else .grove/bootstrap)
-  GROVE_BOOTSTRAP_SHELL Login shell used to run bootstrap commands (default: bash)
-  GROVE_BOOTSTRAP_FORCE Run bootstrap even on an existing worktree
-  GROVE_PALETTE       Override the branch color palette (space/comma-separated hex)
-  GROVE_WEBHOOK_URL   Target URL for the 'webhook' recipe (e.g. http://127.0.0.1:39787/open via a reverse SSH tunnel)
-  GROVE_WEBHOOK_TOKEN Shared secret sent as 'Authorization: Bearer' to docent (optional)
-  GROVE_SSH_HOST      Remote-SSH host alias embedded in webhook payloads
+Configuration lives in grove.json at the project root (beside .base), validated by
+grove.schema.json. It declares an ordered "recipes" array; each entry has a "type"
+plus that type's settings. Built-in types: tmux, vscode-color-config, webhook,
+bootstrap. Any other type resolves to grove-recipe-<type> on PATH (settings exported
+as GROVE_RECIPE_*). Top-level "palette" and "copy" tune colors and copied files.
+'grove clone' seeds a starter grove.json.
 `)
 }
