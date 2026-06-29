@@ -20,7 +20,7 @@ esac
 
 cat <<EOF
 
-Add shell integration (enables 'cd into worktree' on open/switch + the 'wt' alias):
+Add shell integration (enables 'cd into worktree' on open/switch):
 
   bash/zsh:  echo 'source "$here/shell/grove.bash"' >> ~/.bashrc    # or ~/.zshrc
   fish:      echo 'source "$here/shell/grove.fish"' >> ~/.config/fish/config.fish

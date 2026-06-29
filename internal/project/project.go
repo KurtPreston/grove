@@ -65,7 +65,7 @@ func GitPlain(args ...string) error {
 // Resolution
 // ---------------------------------------------------------------------------
 
-// Resolve walks up from start to find the wt/grove project marker (a directory
+// Resolve walks up from start to find the grove project marker (a directory
 // containing .base). Falls back to git's view for repos whose bare dir is named
 // otherwise.
 func Resolve(start string) (*Project, error) {

@@ -2,7 +2,7 @@
 #
 # The grove binary can't change the calling shell's directory, so when a command
 # should move you (open/switch/clone/path), grove writes the target worktree path
-# to $GROVE_CD_FILE and this wrapper performs the cd. `wt` is an alias for grove.
+# to $GROVE_CD_FILE and this wrapper performs the cd.
 #
 # Install: source this file from ~/.bashrc or ~/.zshrc.
 
@@ -18,5 +18,3 @@ grove() {
   rm -f "$_f"
   return $_status
 }
-
-alias wt=grove

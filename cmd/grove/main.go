@@ -7,7 +7,7 @@
 //
 // (1) and (2) are core; (3) is pluggable, configured per project in grove.json.
 //
-// Shell integration: a `grove` shell function (and `wt` alias) sets $GROVE_CD_FILE
+// Shell integration: a `grove` shell function sets $GROVE_CD_FILE
 // before calling this binary. When a command should move the caller's shell, we
 // write the target directory there; the function reads it and performs the cd.
 package main
@@ -505,7 +505,7 @@ func hasBin(name string) bool {
 }
 
 func usage() {
-	fmt.Fprint(os.Stderr, `grove - branch-centric worktree + workflow launcher (alias: wt)
+	fmt.Fprint(os.Stderr, `grove - branch-centric worktree + workflow launcher
 
 Usage:
   grove clone GIT_URL [FOLDER]   Clone a repo (under FOLDER in the current dir) as a bare .base + default worktree

@@ -1,6 +1,6 @@
 // Package color assigns a deterministic, terminal-friendly color to a branch and
-// derives a readable foreground for it. A branch name is hashed (POSIX `cksum`,
-// matching the original bash `wt`) into a hue on the OKLCH color wheel, which
+// derives a readable foreground for it. A branch name is hashed (POSIX `cksum`)
+// into a hue on the OKLCH color wheel, which
 // spreads branches across the full hue circle to minimize color collisions.
 package color
 

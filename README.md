@@ -1,6 +1,6 @@
 # grove
 
-A branch-centric worktree and workflow launcher. Command: `grove` (alias: `wt`).
+A branch-centric worktree and workflow launcher. Command: `grove`.
 
 `grove` manages multiple concurrent branches as [git worktrees](https://git-scm.com/docs/git-worktree)
 instead of juggling several full clones: one bare "base" repo per project, one
@@ -29,7 +29,7 @@ git clone <this-repo> grove && cd grove
 ./install.sh          # builds + installs to ~/.local/bin, prints shell setup
 ```
 
-Then add the shell integration (needed so `grove`/`wt` can `cd` your shell):
+Then add the shell integration (needed so `grove` can `cd` your shell):
 
 ```sh
 # bash/zsh
@@ -40,7 +40,7 @@ echo 'source "/path/to/grove/shell/grove.fish"' >> ~/.config/fish/config.fish
 
 > The binary alone can't change the calling shell's directory, so the shell
 > function reads the target path grove writes to `$GROVE_CD_FILE` and performs the
-> `cd`. The `wt` alias resolves to the same function.
+> `cd`.
 
 ## Usage
 
@@ -94,7 +94,7 @@ runs before tmux takes over the terminal:
 }
 ```
 
-Now `wt some-branch` in that project creates the worktree and runs the command
+Now `grove some-branch` in that project creates the worktree and runs the command
 in it once. Notes:
 
 - The command runs in the **new worktree directory** through a **login shell**
@@ -152,7 +152,7 @@ With this `grove.json` and a reverse SSH tunnel from your workstation
 }
 ```
 
-1. You're SSH'd into your dev box. In `~/Code/myproj` you type `wt feature/x`.
+1. You're SSH'd into your dev box. In `~/Code/myproj` you type `grove feature/x`.
 2. grove creates (or reuses) the `feature-x` worktree and `cd`s you in.
 3. `vscode-color-config` writes the branch color into `.vscode/settings.json`.
 4. `webhook` POSTs `{host, path, name}` back through the tunnel; your

@@ -2,7 +2,7 @@
 #
 # The grove binary can't change the calling shell's directory, so when a command
 # should move you (open/switch/clone/path), grove writes the target worktree path
-# to $GROVE_CD_FILE and this wrapper performs the cd. `wt` wraps grove.
+# to $GROVE_CD_FILE and this wrapper performs the cd.
 #
 # Install: source this file from ~/.config/fish/config.fish.
 
@@ -18,8 +18,4 @@ function grove --description "grove worktree workflow launcher"
     end
     rm -f "$gf"
     return $gs
-end
-
-function wt --wraps grove --description "alias for grove"
-    grove $argv
 end
