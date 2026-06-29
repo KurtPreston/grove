@@ -56,6 +56,7 @@ echo 'source "/path/to/grove/shell/grove.fish"' >> ~/.config/fish/config.fish
 | `grove prune` | Remove worktrees whose branches are merged or whose upstream is gone (keeps branch refs) |
 | `grove rm BRANCH [--force]` | Remove a single worktree (keeps the branch ref) |
 | `grove color BRANCH` | Print the deterministic color for a branch |
+| `grove launch` / `here [DIR]` | Run the user-level recipes for `DIR` (or cwd) without a worktree (see [Launching any folder](#launching-any-folder)) |
 | `grove help` | Show help |
 
 `grove path` and `grove ls --porcelain` write only their result to stdout (all
@@ -158,6 +159,50 @@ With this `grove.json` and a reverse SSH tunnel from your workstation
 4. `webhook` POSTs `{host, path, name}` back through the tunnel; your
    workstation listener opens/focuses a remote Cursor window on that path.
 
+## Launching any folder
+
+The same color + open-a-view experience works for **any directory**, not just
+grove worktrees. This is handy for ordinary repos (e.g. `~/Code/slakkr`) that you
+never cloned with `grove clone`.
+
+Put a **user-level** config at `$XDG_CONFIG_HOME/grove/config.json` (default
+`~/.config/grove/config.json`). It uses the same `recipes` shape as `grove.json`:
+
+```json
+{
+  "recipes": [
+    { "type": "vscode-color-config" },
+    { "type": "webhook", "url": "http://127.0.0.1:39787/open", "token": "secret", "sshHost": "devbox" }
+  ]
+}
+```
+
+Then, from inside a non-grove folder:
+
+```sh
+grove            # bare grove outside a grove project falls back to launch
+grove .          # same
+grove launch     # explicit; grove here is an alias
+grove launch ~/Code/slakkr   # launch a specific directory
+```
+
+grove runs your user-level recipes against the directory, using the **folder name**
+(`slakkr`) for both the color and the webhook view name. No worktree is created
+and your shell is not moved.
+
+Notes:
+
+- **No default recipe is assumed.** With no user config present, the launch is a
+  hard error pointing you at the config path — grove never invents behavior.
+- The webhook still sends `{host, path, name}` to docent exactly as the worktree
+  flow does, so the dedicated virtual-desktop view is handled on the workstation.
+- Theming a *remote* Cursor window relies on writing the folder's
+  `.vscode/settings.json` (added to `.git/info/exclude` locally, just like the
+  worktree flow). Drop `vscode-color-config` from the user config if you don't
+  want that.
+- Inside a grove project, `grove`/`grove .` behave exactly as before; the launch
+  fallback only kicks in when no `.base` is found above the current directory.
+
 ## Project layout created by `grove clone URL myproj`
 
 ```
@@ -201,6 +246,11 @@ and uses the defaults.
 
 The only remaining environment input is `GROVE_CD_FILE`, which the shell wrapper
 sets so grove can tell it where to `cd`; it is not user configuration.
+
+A separate **user-level** config at `~/.config/grove/config.json` (honoring
+`$XDG_CONFIG_HOME`) drives `grove launch` for folders that are not grove
+projects. It reuses the `recipes` shape above but has **no defaults** — see
+[Launching any folder](#launching-any-folder).
 
 ## tmux theming
 

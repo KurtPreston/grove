@@ -65,16 +65,28 @@ func GitPlain(args ...string) error {
 // Resolution
 // ---------------------------------------------------------------------------
 
+// FindRoot walks up from start looking only for the grove project marker (a
+// directory containing .base), returning that directory and true if found.
+// Unlike Resolve, it does NOT consult git, so an ordinary git repo that is not
+// a grove project reports false. This is what distinguishes a real grove
+// worktree from any other directory for the launch fallback.
+func FindRoot(start string) (string, bool) {
+	dir := start
+	for dir != "" && dir != "/" {
+		if isDir(filepath.Join(dir, ".base")) {
+			return dir, true
+		}
+		dir = filepath.Dir(dir)
+	}
+	return "", false
+}
+
 // Resolve walks up from start to find the grove project marker (a directory
 // containing .base). Falls back to git's view for repos whose bare dir is named
 // otherwise.
 func Resolve(start string) (*Project, error) {
-	dir := start
-	for dir != "" && dir != "/" {
-		if isDir(filepath.Join(dir, ".base")) {
-			return &Project{Base: filepath.Join(dir, ".base"), Dir: dir}, nil
-		}
-		dir = filepath.Dir(dir)
+	if dir, ok := FindRoot(start); ok {
+		return &Project{Base: filepath.Join(dir, ".base"), Dir: dir}, nil
 	}
 	if out, err := GitOut(start, "rev-parse", "--git-common-dir"); err == nil {
 		base := strings.TrimSpace(out)

@@ -16,6 +16,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 
 	"grove/internal/color"
@@ -59,6 +60,8 @@ func main() {
 		cmdRm(args[1:])
 	case "color":
 		cmdColor(args[1:])
+	case "launch", "here":
+		cmdLaunch(args[1:])
 	case "help", "-h", "--help":
 		usage()
 	case "":
@@ -132,7 +135,14 @@ func cmdOpen(args []string) {
 }
 
 // cmdSwitch: bare grove / grove switch / grove BRANCH. Runs grove.json's recipes.
+// Outside a grove project, it falls back to launching the current directory with
+// the user-level recipes (see cmdLaunch).
 func cmdSwitch(args []string) {
+	if _, ok := project.FindRoot(mustGetwd()); !ok {
+		ui.Warn("not a grove project; launching current directory with user recipes.")
+		cmdLaunch(nil)
+		return
+	}
 	p := mustResolve()
 	args, force := popForce(args)
 	branch := ""
@@ -410,6 +420,37 @@ func cmdColor(args []string) {
 	fmt.Printf("%s %s\n", color.Swatch(hex), hex)
 }
 
+// cmdLaunch: grove launch [DIR] / grove here. Runs the user-level recipes
+// (~/.config/grove/config.json) against DIR (or cwd) without requiring a grove
+// project or creating a worktree. Used directly and as the fallback for bare
+// grove invocations outside a grove project.
+func cmdLaunch(args []string) {
+	dir := mustGetwd()
+	if len(args) >= 1 && args[0] != "" {
+		dir = trimSlash(args[0])
+	}
+	abs, err := filepath.Abs(dir)
+	if err != nil {
+		ui.Die("cannot resolve directory: " + err.Error())
+	}
+	if fi, err := os.Stat(abs); err != nil || !fi.IsDir() {
+		ui.Die("not a directory: " + abs)
+	}
+
+	cfg, found, err := config.LoadUser()
+	if err != nil {
+		ui.Warn("user config: " + err.Error() + "; ignoring recipes.")
+	}
+	if !found {
+		path, _ := config.UserConfigPath()
+		ui.Die("no user recipes configured; create " + path +
+			` with a "recipes" array (e.g. vscode-color-config, webhook).`)
+	}
+
+	name := filepath.Base(abs)
+	recipe.Run(cfg.Recipes, buildLaunchContext(name, abs))
+}
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -428,6 +469,23 @@ func buildContext(p *project.Project, branch, dir string, created, force bool) r
 		InSSH:         inSSH,
 		Created:       created,
 		Force:         force,
+	}
+}
+
+// buildLaunchContext builds a recipe Context for a plain directory (no
+// worktree/project). The folder basename doubles as the branch/project name, so
+// the webhook recipe opens a view named after the folder and the color is
+// derived from it.
+func buildLaunchContext(name, dir string) recipe.Context {
+	hex := color.ForBranch(name)
+	return recipe.Context{
+		Branch:     name,
+		Dir:        dir,
+		Color:      hex,
+		Fg:         color.FgForHex(hex),
+		Project:    name,
+		ProjectDir: dir,
+		InSSH:      inSSH,
 	}
 }
 
@@ -518,6 +576,7 @@ Usage:
   grove prune                    Remove merged/gone worktrees (keeps branch refs)
   grove rm BRANCH [--force]      Remove a single worktree (keeps branch ref)
   grove color BRANCH             Print the deterministic color for BRANCH
+  grove launch | here [DIR]      Run user-level recipes for DIR (or cwd) without a worktree
   grove help                     Show this help
 
 Pass --force to open/switch to re-run one-time recipes (bootstrap) on an existing worktree.
@@ -529,5 +588,10 @@ bootstrap. Any other type resolves to grove-recipe-<type> on PATH (settings expo
 as GROVE_RECIPE_*). The top-level "copy" array tunes which files are copied.
 Branch colors are derived automatically from a hash of the branch name.
 'grove clone' seeds a starter grove.json.
+
+Outside a grove project, 'grove' (or 'grove launch [DIR]') runs the recipes from a
+user-level config at $XDG_CONFIG_HOME/grove/config.json (default ~/.config/grove/config.json)
+against the directory, using the folder name for the color and webhook view. No
+default recipe is assumed: with no user config, the launch is a no-op error.
 `)
 }

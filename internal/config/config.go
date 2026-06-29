@@ -98,6 +98,44 @@ func Load(projectDir string) (Config, error) {
 	return cfg, nil
 }
 
+// UserConfigPath returns the path to grove's user-level config, used by the
+// launch flow when cwd is not inside a grove project. It honors
+// $XDG_CONFIG_HOME, falling back to ~/.config/grove/config.json.
+func UserConfigPath() (string, error) {
+	dir := os.Getenv("XDG_CONFIG_HOME")
+	if dir == "" {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return "", err
+		}
+		dir = filepath.Join(home, ".config")
+	}
+	return filepath.Join(dir, "grove", "config.json"), nil
+}
+
+// LoadUser reads the user-level config (see UserConfigPath). Unlike Load, it
+// does NOT fall back to Defaults(): outside a grove project there is no sensible
+// implicit recipe, so a missing file yields found=false and the caller decides
+// what to do. An unreadable or invalid file is reported via err (found=true).
+func LoadUser() (cfg Config, found bool, err error) {
+	path, err := UserConfigPath()
+	if err != nil {
+		return Config{}, false, err
+	}
+	b, err := os.ReadFile(path)
+	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return Config{}, false, nil
+		}
+		return Config{}, false, err
+	}
+	if err := json.Unmarshal(b, &cfg); err != nil {
+		return Config{}, true, err
+	}
+	cfg.validate()
+	return cfg, true, nil
+}
+
 // Seed writes a starter grove.json at projectDir, but only if none exists yet
 // (so re-cloning or manual edits are never clobbered).
 func Seed(projectDir string) error {
