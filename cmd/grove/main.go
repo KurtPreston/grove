@@ -13,6 +13,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -341,9 +342,12 @@ func cmdPrune() {
 		if tmux.Has() {
 			tmux.KillWindow(session, project.Sanitize(c.branch))
 		}
-		if err := p.RemoveWorktree(c.path, false); err != nil {
-			ui.Warn(fmt.Sprintf("%s is dirty; use 'grove rm %s --force' to remove it.", c.path, c.branch))
-		} else {
+		switch err := p.RemoveWorktree(c.path, false); {
+		case errors.Is(err, project.ErrWorktreeDirty):
+			ui.Warn(fmt.Sprintf("%s has local changes; use 'grove rm %s --force' to remove it.", c.path, c.branch))
+		case err != nil:
+			ui.Warn(fmt.Sprintf("Could not remove %s: %v", c.path, err))
+		default:
 			ui.Info(fmt.Sprintf("Removed worktree %s (branch '%s' kept).", c.path, c.branch))
 		}
 	}
@@ -406,8 +410,11 @@ func cmdRm(args []string) {
 	if tmux.Has() {
 		tmux.KillWindow(project.Sanitize(p.Name()), project.Sanitize(branch))
 	}
-	if err := p.RemoveWorktree(dir, force); err != nil {
-		ui.Die(dir + " has changes; re-run with --force to discard them.")
+	switch err := p.RemoveWorktree(dir, force); {
+	case errors.Is(err, project.ErrWorktreeDirty):
+		ui.Die(dir + " has local changes; re-run with --force to discard them.")
+	case err != nil:
+		ui.Die("could not remove " + dir + ": " + err.Error())
 	}
 	ui.Info("Removed worktree for '" + branch + "' (branch ref kept).")
 }
@@ -574,7 +581,7 @@ Usage:
   grove tmux                     Attach the project session, building a window per worktree
   grove list | ls [--porcelain]  List worktrees; --porcelain prints branch<TAB>path to stdout
   grove prune                    Remove merged/gone worktrees (keeps branch refs)
-  grove rm BRANCH [--force]      Remove a single worktree (keeps branch ref)
+  grove rm BRANCH [--force]      Remove a single worktree (keeps branch ref); --force discards local changes
   grove color BRANCH             Print the deterministic color for BRANCH
   grove launch | here [DIR]      Run user-level recipes for DIR (or cwd) without a worktree
   grove help                     Show this help

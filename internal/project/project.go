@@ -6,6 +6,7 @@ package project
 
 import (
 	"bufio"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -314,12 +315,44 @@ func (p *Project) setupWorktree(dir string, copyFiles []string) {
 	}
 }
 
+// ErrWorktreeDirty is returned by RemoveWorktree (without force) when the
+// worktree has local changes and is therefore left in place.
+var ErrWorktreeDirty = errors.New("worktree has local changes")
+
+// WorktreeClean reports whether the worktree at dir has no local changes.
+// Submodule modifications are counted (--ignore-submodules=none overrides any
+// per-submodule ignore settings) so unpushed submodule work is never treated as
+// clean and silently discarded.
+func (p *Project) WorktreeClean(dir string) bool {
+	out, err := GitOut(dir, "status", "--porcelain", "--ignore-submodules=none")
+	if err != nil {
+		return false
+	}
+	return strings.TrimSpace(out) == ""
+}
+
 // RemoveWorktree removes a worktree directory (keeping the branch ref).
+//
+// git's plain `worktree remove` refuses any worktree that contains populated
+// submodules (its validate_no_submodules guard), so grove always passes -f to
+// clear that guard. Because -f also makes git discard local changes, grove — not
+// git — decides whether removal is safe:
+//
+//   - force == false: WorktreeClean gates the removal. A clean tree is removed
+//     even if it has submodules; a dirty tree (including modified submodule
+//     content) is left alone and ErrWorktreeDirty is returned.
+//   - force == true: discard everything, including dirty submodule state. Two -f
+//     flags are passed so removal succeeds across git versions (some git versions
+//     require -f twice to discard an unclean worktree; the first also clears the
+//     submodule guard).
 func (p *Project) RemoveWorktree(path string, force bool) error {
 	if force {
-		return Git(p.Base, "worktree", "remove", "--force", path)
+		return Git(p.Base, "worktree", "remove", "--force", "--force", path)
 	}
-	return Git(p.Base, "worktree", "remove", path)
+	if !p.WorktreeClean(path) {
+		return ErrWorktreeDirty
+	}
+	return Git(p.Base, "worktree", "remove", "--force", path)
 }
 
 // Prune fetches with --prune so gone upstreams are reflected before pruning.
