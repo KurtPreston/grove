@@ -40,7 +40,7 @@
               "type": { "const": "webhook" },
               "url": {
                 "type": "string",
-                "description": "Target URL, e.g. http://127.0.0.1:39787/open via a reverse SSH tunnel."
+                "description": "Target URL, e.g. http://127.0.0.1:39788/open via a reverse SSH tunnel."
               },
               "token": {
                 "type": "string",

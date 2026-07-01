@@ -17,19 +17,19 @@ func init() { recipe.Register("webhook", webhookRecipe) }
 
 // webhookRecipe POSTs the workspace descriptor to the recipe's url. For the
 // remote (SSH) flow, point url at the reverse-tunnel endpoint, e.g.
-// http://127.0.0.1:39787/open, which forwards to docent on your workstation.
+// http://127.0.0.1:39788/open, which forwards to wsm on your workstation.
 func webhookRecipe(ctx recipe.Context, rc config.RecipeConfig) error {
 	if rc.URL == "" {
 		ui.Warn("webhook: recipe \"url\" is not set; skipping.")
 		return nil
 	}
 	if rc.SSHHost == "" {
-		ui.Warn("webhook: recipe \"sshHost\" not set; docent won't know which host to open.")
+		ui.Warn("webhook: recipe \"sshHost\" not set; wsm won't know which host to open.")
 	}
 	return postWorkspace(rc, ctx)
 }
 
-// payload is the loose contract shared with docent: {host, path, name}.
+// payload is the loose contract shared with wsm: {host, path, name}.
 type payload struct {
 	Host string `json:"host"`
 	Path string `json:"path"`

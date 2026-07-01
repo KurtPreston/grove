@@ -108,18 +108,18 @@ in it once. Notes:
 ### `webhook`: open the worktree on another machine
 
 The webhook payload is a loose contract `{host, path, name}` consumed by a
-companion workstation listener (e.g. [docent](https://github.com/KurtPreston/docent)),
+companion workstation listener (e.g. [wsm](https://github.com/KurtPreston/wsm)),
 which opens/focuses a remote editor at `host:path`.
 
 For the remote (SSH) flow, point the recipe's `url` at the reverse-tunnel
-endpoint — e.g. `http://127.0.0.1:39787/open` — which a reverse SSH tunnel
-(`RemoteForward 39787 127.0.0.1:39787`) forwards to docent on the machine you
-SSH'd in from. Set `sshHost` so docent knows which host to open. If `token` is
+endpoint — e.g. `http://127.0.0.1:39788/open` — which a reverse SSH tunnel
+(`RemoteForward 39788 127.0.0.1:39788`) forwards to wsm on the machine you
+SSH'd in from. Set `sshHost` so wsm knows which host to open. If `token` is
 set, the recipe adds an `Authorization: Bearer <token>` header so the listener
-can require a shared secret (docent does, when its own token is configured).
+can require a shared secret (wsm requires a token in all modes).
 
 ```json
-{ "type": "webhook", "url": "http://127.0.0.1:39787/open", "token": "secret", "sshHost": "devbox" }
+{ "type": "webhook", "url": "http://127.0.0.1:39788/open", "token": "secret", "sshHost": "devbox" }
 ```
 
 ### Writing your own recipe
@@ -142,13 +142,13 @@ your `PATH`. grove invokes it with the following environment:
 ## Example: remote workflow
 
 With this `grove.json` and a reverse SSH tunnel from your workstation
-(`RemoteForward 39787 127.0.0.1:39787`):
+(`RemoteForward 39788 127.0.0.1:39788`):
 
 ```json
 {
   "recipes": [
     { "type": "vscode-color-config" },
-    { "type": "webhook", "url": "http://127.0.0.1:39787/open", "sshHost": "devbox" }
+    { "type": "webhook", "url": "http://127.0.0.1:39788/open", "sshHost": "devbox" }
   ]
 }
 ```
@@ -172,7 +172,7 @@ Put a **user-level** config at `$XDG_CONFIG_HOME/grove/config.json` (default
 {
   "recipes": [
     { "type": "vscode-color-config" },
-    { "type": "webhook", "url": "http://127.0.0.1:39787/open", "token": "secret", "sshHost": "devbox" }
+    { "type": "webhook", "url": "http://127.0.0.1:39788/open", "token": "secret", "sshHost": "devbox" }
   ]
 }
 ```
@@ -194,7 +194,7 @@ Notes:
 
 - **No default recipe is assumed.** With no user config present, the launch is a
   hard error pointing you at the config path — grove never invents behavior.
-- The webhook still sends `{host, path, name}` to docent exactly as the worktree
+- The webhook still sends `{host, path, name}` to wsm exactly as the worktree
   flow does, so the dedicated virtual-desktop view is handled on the workstation.
 - Theming a *remote* Cursor window relies on writing the folder's
   `.vscode/settings.json` (added to `.git/info/exclude` locally, just like the
@@ -229,7 +229,7 @@ autocomplete and inline validation.
   "recipes": [
     { "type": "bootstrap", "command": "nvm use && yarn install && yarn build" },
     { "type": "vscode-color-config" },
-    { "type": "webhook", "url": "http://127.0.0.1:39787/open", "token": "secret", "sshHost": "devbox" },
+    { "type": "webhook", "url": "http://127.0.0.1:39788/open", "token": "secret", "sshHost": "devbox" },
     { "type": "tmux", "layout": "shell=,claude=claude" }
   ]
 }
