@@ -324,6 +324,7 @@ func cmdPrune(args []string) {
 		}
 	}
 	p := mustResolve()
+	cfg := loadCfg(p)
 	def := p.DefaultBranch()
 	ui.Info("Fetching and pruning remotes...")
 	p.Prune()
@@ -333,7 +334,7 @@ func cmdPrune(args []string) {
 	type cand struct{ branch, path, reason string }
 	var candidates []cand
 	for _, w := range wts {
-		if r := pruneReason(p, w, def, cwd); r != "" {
+		if r := pruneReason(p, w, def, cwd, cfg); r != "" {
 			candidates = append(candidates, cand{w.Branch, w.Path, r})
 		}
 	}
@@ -377,7 +378,7 @@ func cmdPrune(args []string) {
 // pruneReason returns why a worktree is a prune candidate ("merged", "squashed",
 // or "gone"), or "" when it should be kept. A worktree is never a candidate when
 // it is bare, has no branch, is the default branch, or is the current directory.
-func pruneReason(p *project.Project, w project.Worktree, def, cwd string) string {
+func pruneReason(p *project.Project, w project.Worktree, def, cwd string, cfg config.Config) string {
 	if w.Path == "" || w.Branch == "" || w.Bare {
 		return ""
 	}
@@ -390,7 +391,7 @@ func pruneReason(p *project.Project, w project.Worktree, def, cwd string) string
 	}
 	// Squash/rebase merges rewrite history, so ancestry misses them; fall back
 	// to patch-equivalence against origin/default.
-	if p.BranchSquashMerged(w.Branch, into) {
+	if cfg.SquashDetectionEnabled() && p.BranchSquashMerged(w.Branch, into) {
 		return "squashed"
 	}
 	// Upstream still present? keep.

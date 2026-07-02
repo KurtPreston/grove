@@ -19,6 +19,32 @@
       "type": "array",
       "description": "Ordered recipes run when a branch is opened.",
       "items": { "$ref": "#/$defs/recipe" }
+    },
+    "prune": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Settings for `grove prune` merge detection.",
+      "properties": {
+        "detectSquash": {
+          "type": "boolean",
+          "description": "Detect squash/rebase-merged branches via patch-equivalence against origin/<default> (default: true)."
+        },
+        "forge": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Optionally consult a forge (via the gh CLI) for authoritative merged-PR state.",
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "description": "Enable the gh-based merged-PR lookup (default: false). Requires gh on PATH and authentication for the remote's host."
+            },
+            "repo": {
+              "type": "string",
+              "description": "Override the auto-detected host/owner/repo passed to `gh --repo` (e.g. github.com/owner/repo)."
+            }
+          }
+        }
+      }
     }
   },
   "$defs": {

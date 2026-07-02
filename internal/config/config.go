@@ -35,6 +35,54 @@ type Config struct {
 	Copy []string `json:"copy,omitempty"`
 	// Recipes are run, in order, when a branch is opened.
 	Recipes []RecipeConfig `json:"recipes,omitempty"`
+	// Prune configures `grove prune` merge detection. When omitted, squash/rebase
+	// detection is on and the forge PR check is off.
+	Prune *PruneConfig `json:"prune,omitempty"`
+}
+
+// PruneConfig holds the settings `grove prune` uses to decide which worktrees'
+// branches count as merged.
+type PruneConfig struct {
+	// DetectSquash enables patch-equivalence detection of squash/rebase merges
+	// (branches whose tip is not an ancestor of origin/default). Defaults to true
+	// when nil.
+	DetectSquash *bool `json:"detectSquash,omitempty"`
+	// Forge optionally consults a forge (via the gh CLI) for authoritative
+	// merged-PR state.
+	Forge *ForgeConfig `json:"forge,omitempty"`
+}
+
+// ForgeConfig configures the optional forge PR check used by `grove prune`.
+type ForgeConfig struct {
+	// Enabled turns on the gh-based merged-PR lookup. Requires gh on PATH and
+	// authentication for the remote's host.
+	Enabled bool `json:"enabled,omitempty"`
+	// Repo overrides the auto-detected host/owner/repo passed to `gh --repo`.
+	Repo string `json:"repo,omitempty"`
+}
+
+// SquashDetectionEnabled reports whether `grove prune` should use
+// patch-equivalence to catch squash/rebase merges (the default).
+func (c Config) SquashDetectionEnabled() bool {
+	if c.Prune == nil || c.Prune.DetectSquash == nil {
+		return true
+	}
+	return *c.Prune.DetectSquash
+}
+
+// ForgeEnabled reports whether `grove prune` should consult the forge for
+// merged-PR state.
+func (c Config) ForgeEnabled() bool {
+	return c.Prune != nil && c.Prune.Forge != nil && c.Prune.Forge.Enabled
+}
+
+// ForgeRepo returns the configured host/owner/repo override for the forge check,
+// or "" to auto-detect from the origin remote.
+func (c Config) ForgeRepo() string {
+	if c.Prune == nil || c.Prune.Forge == nil {
+		return ""
+	}
+	return c.Prune.Forge.Repo
 }
 
 // RecipeConfig is one entry in the recipes array: a recipe Type plus the
