@@ -76,7 +76,7 @@ echo 'source "/path/to/grove/shell/grove.fish"' >> ~/.config/fish/config.fish
 | `grove path BRANCH` | Resolve (creating if needed) BRANCH's worktree and print its absolute path to stdout |
 | `grove tmux` | Attach the project's tmux session, building a window for every worktree |
 | `grove list` / `ls [--porcelain]` | List worktrees; `--porcelain` prints `branch<TAB>path` to stdout |
-| `grove prune` | Remove worktrees whose branches are merged or whose upstream is gone (keeps branch refs); skips any with local changes |
+| `grove prune [--dry-run]` | Remove worktrees whose branches are merged (including squash/rebase merges) or whose upstream is gone (keeps branch refs); skips any with local changes. `--dry-run`/`-n` lists candidates without removing anything |
 | `grove rm BRANCH [--force]` | Remove a single worktree (keeps the branch ref); `--force` discards local changes |
 | `grove color BRANCH` | Print the deterministic color for a branch |
 | `grove launch` / `here [DIR]` | Run the user-level recipes for `DIR` (or cwd) without a worktree (see [Launching any folder](#launching-any-folder)) |
@@ -308,10 +308,42 @@ autocomplete and inline validation.
 |-----|---------|-------------|
 | `copy` | `[".env"]` | Untracked files copied from the default-branch worktree into new worktrees |
 | `recipes` | `[{ "type": "tmux" }]` | Ordered recipes run on open/switch (see [Recipes](#recipes)) |
+| `prune` | _(see below)_ | Tunes how `grove prune` decides which branches count as merged (see [Prune detection](#prune-detection)) |
 
 When `grove.json` is absent grove falls back to these defaults, so a project
 works before you write any config. A malformed file is non-fatal: grove warns
 and uses the defaults.
+
+### Prune detection
+
+`grove prune` keeps branch refs and only removes clean worktrees. A worktree is
+a candidate when its branch is:
+
+- **merged** — an ancestor of `origin/<default>` (`git branch --merged`);
+- **squashed** — its net diff already exists in `origin/<default>`, detected via
+  patch-equivalence so squash- and rebase-merged branches are caught even though
+  their tips are not ancestors (on by default);
+- **forge** — matched to a merged pull request reported by the forge (opt-in);
+- **gone** — its configured upstream has disappeared after `git fetch --prune`.
+
+The optional `prune` block tunes the squash and forge checks:
+
+```jsonc
+"prune": {
+  "detectSquash": true,           // default; set false to disable patch-equivalence detection
+  "forge": {
+    "enabled": false,             // default; when true, consult the forge via the gh CLI
+    "repo": "github.com/owner/repo" // optional; overrides the slug derived from origin
+  }
+}
+```
+
+The forge check runs one `gh pr list --state merged` query and treats any branch
+matching a merged PR's head as a candidate. It requires `gh` on `PATH` and
+authentication for the remote's host; if `gh` is missing, the repo can't be
+resolved, or the query fails, grove warns once and falls back to the git-only
+checks. Run `grove prune --dry-run` to preview candidates (with their reason)
+without removing anything.
 
 The only remaining environment input is `GROVE_CD_FILE`, which the shell wrapper
 sets so grove can tell it where to `cd`; it is not user configuration.

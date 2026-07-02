@@ -24,5 +24,9 @@
 
     // Commands to bootstrap the branch. "onOpen: false" means it will only run once, when the worktree is created
     // { "type": "command", "command": "npm install", "onOpen": false },
-  ]
+  ],
+
+  // Tune `grove prune` merge detection. Squash/rebase detection is on by default;
+  // enable "forge" to also treat branches with a merged PR (via the gh CLI) as prunable.
+  // "prune": { "detectSquash": true, "forge": { "enabled": false } },
 }
