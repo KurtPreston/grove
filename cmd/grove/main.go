@@ -33,6 +33,14 @@ import (
 // it is set by sshd, not user config. Everything else lives in grove.json.
 var inSSH bool
 
+// Build metadata, injected via -ldflags at release time (see .goreleaser.yaml).
+// Defaults apply to `go build`/`go install` and source checkouts.
+var (
+	version = "dev"
+	commit  = "none"
+	date    = "unknown"
+)
+
 func main() {
 	inSSH = os.Getenv("SSH_CONNECTION") != ""
 
@@ -63,6 +71,8 @@ func main() {
 		cmdColor(args[1:])
 	case "launch", "here":
 		cmdLaunch(args[1:])
+	case "version", "--version", "-v":
+		cmdVersion()
 	case "help", "-h", "--help":
 		usage()
 	case "":
@@ -427,6 +437,11 @@ func cmdColor(args []string) {
 	fmt.Printf("%s %s\n", color.Swatch(hex), hex)
 }
 
+// cmdVersion prints the build version and metadata baked in at release time.
+func cmdVersion() {
+	fmt.Printf("grove %s (commit %s, built %s)\n", version, commit, date)
+}
+
 // cmdLaunch: grove launch [DIR] / grove here. Runs the user-level recipes
 // (~/.config/grove/config.json) against DIR (or cwd) without requiring a grove
 // project or creating a worktree. Used directly and as the fallback for bare
@@ -584,6 +599,7 @@ Usage:
   grove rm BRANCH [--force]      Remove a single worktree (keeps branch ref); --force discards local changes
   grove color BRANCH             Print the deterministic color for BRANCH
   grove launch | here [DIR]      Run user-level recipes for DIR (or cwd) without a worktree
+  grove version                  Print the grove version and build metadata
   grove help                     Show this help
 
 Pass --force to open/switch to re-run create-only recipes ("onOpen": false) on an existing worktree.
