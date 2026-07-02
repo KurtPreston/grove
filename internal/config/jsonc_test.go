@@ -51,6 +51,39 @@ func TestStripJSONCPreservesEscapedQuotes(t *testing.T) {
 	}
 }
 
+func TestSeedWritesParseableJSONC(t *testing.T) {
+	dir := t.TempDir()
+	if err := Seed(dir); err != nil {
+		t.Fatalf("Seed: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, SeedFilename)); err != nil {
+		t.Fatalf("expected %s to be written: %v", SeedFilename, err)
+	}
+
+	cfg, err := Load(dir)
+	if err != nil {
+		t.Fatalf("Load of seeded config: %v", err)
+	}
+	if len(cfg.Recipes) == 0 {
+		t.Fatal("seeded config parsed to zero recipes")
+	}
+
+	// Re-seeding must not clobber an existing config (jsonc or json).
+	if err := os.WriteFile(filepath.Join(dir, SeedFilename), []byte(`{"copy":["mine"]}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := Seed(dir); err != nil {
+		t.Fatalf("re-Seed: %v", err)
+	}
+	cfg, err = Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.Copy) != 1 || cfg.Copy[0] != "mine" {
+		t.Errorf("Seed clobbered an existing config: copy=%#v", cfg.Copy)
+	}
+}
+
 func TestLoadPrefersJSONC(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "grove.json"), []byte(`{"copy":["from-json"]}`), 0o644); err != nil {

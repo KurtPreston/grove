@@ -46,7 +46,7 @@ echo 'source "/path/to/grove/shell/grove.fish"' >> ~/.config/fish/config.fish
 
 | Command | Description |
 |---------|-------------|
-| `grove clone GIT_URL [FOLDER]` | Clone a repo as a bare `.base` plus a worktree for the default branch under `FOLDER` in the current directory, and seed a starter `grove.json` |
+| `grove clone GIT_URL [FOLDER]` | Clone a repo as a bare `.base` plus a worktree for the default branch under `FOLDER` in the current directory, and seed a starter (commented) `grove.jsonc` |
 | `grove BRANCH` | Switch to (or create) BRANCH's worktree and run the recipes in `grove.json` |
 | `grove open [BRANCH] [TYPES] [--force]` | Open BRANCH (or the current worktree's branch if omitted/`.`); `TYPES` (comma-separated) filters the configured recipes to those types; `--force` re-runs one-time recipes |
 | `grove switch [BRANCH]` | Like a bare BRANCH; with no branch and `fzf` installed, opens a picker |
@@ -250,7 +250,7 @@ Notes:
 ```
 ./myproj/
 ├── .base/          # bare repo (shared object store) for all worktrees
-├── grove.json      # this project's config (machine-local; not committed)
+├── grove.jsonc     # this project's config (machine-local; not committed)
 ├── main/           # worktree for the default branch
 └── feature-x/      # worktree for branch feature/x  ('/' -> '-' in the dir name)
 ```
@@ -259,11 +259,12 @@ Notes:
 
 All configuration lives in a single `grove.json` at the project root, **beside
 `.base`** — not inside a worktree, so it is never committed and can safely hold
-machine-specific values (a webhook token, an SSH host alias). grove also reads
-`grove.jsonc` (preferred when both exist), and either extension tolerates `//`
-and `/* */` comments plus trailing commas. `grove clone` seeds a starter file;
-edit it to taste. It is validated by [`grove.schema.json`](grove.schema.json);
-add a `$schema` reference for editor autocomplete and inline validation.
+machine-specific values (a webhook token, an SSH host alias). grove reads
+`grove.jsonc` in preference to `grove.json`, and either extension tolerates `//`
+and `/* */` comments plus trailing commas. `grove clone` seeds a starter
+`grove.jsonc` (commented, with ready-to-uncomment example recipes); edit it to
+taste. It is validated by [`grove.schema.json`](grove.schema.json); add a
+`$schema` reference for editor autocomplete and inline validation.
 
 ```json
 {

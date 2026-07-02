@@ -17,19 +17,43 @@ import (
 	"grove/internal/ui"
 )
 
-// Filename is the config file grove looks for at the project root.
+// Filename is the plain-JSON config name grove looks for at the project root
+// (the fallback used when no grove.jsonc is present).
 const Filename = "grove.json"
+
+// SeedFilename is the config file `grove clone` writes for a fresh project: a
+// commented grove.jsonc.
+const SeedFilename = "grove.jsonc"
 
 // SchemaURL is the canonical location of grove.schema.json, referenced from the
 // "$schema" key of seeded config files for editor validation.
 const SchemaURL = "https://raw.githubusercontent.com/KurtPreston/grove/main/grove.schema.json"
 
-// starter is the grove.json written by Seed for a fresh project.
+// starter is the commented grove.jsonc written by Seed for a fresh project. It
+// leans on JSONC (comments + trailing commas) to ship ready-to-uncomment
+// example recipes alongside the defaults.
 const starter = `{
+  // grove project config. This is JSONC: // and /* */ comments and trailing
+  // commas are allowed. The $schema below powers editor autocomplete + linting.
   "$schema": "` + SchemaURL + `",
+
+  // Untracked files copied from the default-branch worktree into new worktrees.
   "copy": [".env"],
+
+  // Recipes run in order when you open a branch. Each entry has a "type" plus
+  // that type's settings, and may set "onCreate"/"onOpen" (both default true)
+  // to control when it runs.
   "recipes": [
+    // Write the branch color into .vscode/settings.json (VSCode/Cursor).
     { "type": "vscode-color-config" },
+
+    // Per-project setup, run once when a worktree is first created:
+    // { "type": "command", "command": "nvm use && yarn install && yarn build", "onOpen": false },
+
+    // Open/focus a window on your workstation over a reverse SSH tunnel:
+    // { "type": "webhook", "url": "http://127.0.0.1:39788/open", "token": "$GROVE_WEBHOOK_TOKEN", "params": { "host": "devbox", "path": "$GROVE_DIR", "name": "$GROVE_NAME" } },
+
+    // Ensure a tmux session with one window per worktree, then attach.
     { "type": "tmux", "layout": "shell=,claude=claude" }
   ]
 }
@@ -179,14 +203,16 @@ func LoadUser() (cfg Config, found bool, err error) {
 	return cfg, true, nil
 }
 
-// Seed writes a starter grove.json at projectDir, but only if none exists yet
-// (so re-cloning or manual edits are never clobbered).
+// Seed writes a starter grove.jsonc at projectDir, but only if no config
+// (grove.jsonc or grove.json) exists yet, so re-cloning or manual edits are
+// never clobbered.
 func Seed(projectDir string) error {
-	path := filepath.Join(projectDir, Filename)
-	if _, err := os.Stat(path); err == nil {
-		return nil
+	for _, name := range []string{SeedFilename, Filename} {
+		if _, err := os.Stat(filepath.Join(projectDir, name)); err == nil {
+			return nil
+		}
 	}
-	return os.WriteFile(path, []byte(starter), 0o644)
+	return os.WriteFile(filepath.Join(projectDir, SeedFilename), []byte(starter), 0o644)
 }
 
 // validate emits warnings for recipe entries that are missing the fields their

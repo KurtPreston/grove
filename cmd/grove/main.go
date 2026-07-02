@@ -101,9 +101,9 @@ func cmdClone(args []string) {
 		ui.Die(err.Error())
 	}
 	if err := config.Seed(p.Dir); err != nil {
-		ui.Warn("could not write starter grove.json: " + err.Error())
+		ui.Warn("could not write starter " + config.SeedFilename + ": " + err.Error())
 	} else {
-		ui.Info("Wrote starter " + config.Filename + " (edit it to configure recipes).")
+		ui.Info("Wrote starter " + config.SeedFilename + " (edit it to configure recipes).")
 	}
 	cfg := loadCfg(p)
 	emitCD(dir)
@@ -596,7 +596,7 @@ tmux, vscode-color-config, webhook, command. Any other type resolves to
 grove-recipe-<type> on PATH (settings exported as GROVE_RECIPE_*). The top-level
 "copy" array tunes which files are copied.
 Branch colors are derived automatically from a hash of the branch name.
-'grove clone' seeds a starter grove.json.
+'grove clone' seeds a starter grove.jsonc.
 
 Outside a grove project, 'grove' (or 'grove launch [DIR]') runs the recipes from a
 user-level config at $XDG_CONFIG_HOME/grove/config.json (default ~/.config/grove/config.json)
