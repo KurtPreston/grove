@@ -362,6 +362,47 @@ func (p *Project) Prune() {
 	}
 }
 
+// BranchSquashMerged reports whether branch's net changes are already present in
+// into (e.g. "origin/main") even when the branch was squash- or rebase-merged.
+// Those merges rewrite history, so the branch tip is not an ancestor of into and
+// `git branch --merged` never lists it.
+//
+// It synthesizes a commit holding branch's tree parented on the merge-base of
+// branch and into, then asks `git cherry` whether that combined diff is already
+// upstream: a leading "-" means an equivalent patch exists in into. The
+// synthesized commit is dangling (no ref points at it) and is reclaimed by gc.
+func (p *Project) BranchSquashMerged(branch, into string) bool {
+	base, err := GitOut(p.Base, "merge-base", into, branch)
+	if err != nil {
+		return false
+	}
+	base = strings.TrimSpace(base)
+	if base == "" {
+		return false
+	}
+	tree, err := GitOut(p.Base, "rev-parse", branch+"^{tree}")
+	if err != nil {
+		return false
+	}
+	tree = strings.TrimSpace(tree)
+	if tree == "" {
+		return false
+	}
+	virt, err := GitOut(p.Base, "commit-tree", tree, "-p", base, "-m", "_")
+	if err != nil {
+		return false
+	}
+	virt = strings.TrimSpace(virt)
+	if virt == "" {
+		return false
+	}
+	out, err := GitOut(p.Base, "cherry", into, virt)
+	if err != nil {
+		return false
+	}
+	return strings.HasPrefix(strings.TrimSpace(out), "-")
+}
+
 // AddLocalExclude adds a gitignore pattern to the worktree's info/exclude so
 // grove's generated artifacts don't show up as dirty in `git status`.
 func AddLocalExclude(dir, pattern string) {

@@ -64,7 +64,7 @@ func main() {
 	case "list", "ls":
 		cmdList(args[1:])
 	case "prune":
-		cmdPrune()
+		cmdPrune(args[1:])
 	case "rm", "remove":
 		cmdRm(args[1:])
 	case "color":
@@ -316,7 +316,13 @@ func printRow(p *project.Project, session string, w project.Worktree) {
 		sw, tmuxMark, dirty, branch, ui.Dim, w.Path, ui.Reset)
 }
 
-func cmdPrune() {
+func cmdPrune(args []string) {
+	dry := false
+	for _, a := range args {
+		if a == "--dry-run" || a == "-n" {
+			dry = true
+		}
+	}
 	p := mustResolve()
 	def := p.DefaultBranch()
 	ui.Info("Fetching and pruning remotes...")
@@ -324,11 +330,11 @@ func cmdPrune() {
 
 	wts, _ := p.Worktrees()
 	cwd := mustGetwd()
-	type cand struct{ branch, path string }
+	type cand struct{ branch, path, reason string }
 	var candidates []cand
 	for _, w := range wts {
-		if pruneConsider(p, w, def, cwd) {
-			candidates = append(candidates, cand{w.Branch, w.Path})
+		if r := pruneReason(p, w, def, cwd); r != "" {
+			candidates = append(candidates, cand{w.Branch, w.Path, r})
 		}
 	}
 	if len(candidates) == 0 {
@@ -338,8 +344,12 @@ func cmdPrune() {
 
 	ui.Log("The following worktrees are merged or gone (branch refs are kept):")
 	for _, c := range candidates {
-		fmt.Fprintf(os.Stderr, "  %s %-28s %s%s%s\n",
-			color.Swatch(color.ForBranch(c.branch)), c.branch, ui.Dim, c.path, ui.Reset)
+		fmt.Fprintf(os.Stderr, "  %s %-28s %s%-9s %s%s\n",
+			color.Swatch(color.ForBranch(c.branch)), c.branch, ui.Dim, c.reason, c.path, ui.Reset)
+	}
+	if dry {
+		ui.Info("Dry run; no worktrees removed.")
+		return
 	}
 	fmt.Fprint(os.Stderr, "Remove these worktree directories? [y/N] ")
 	if !readYes() {
@@ -364,24 +374,34 @@ func cmdPrune() {
 	_ = project.Git(p.Base, "worktree", "prune")
 }
 
-// pruneConsider reports whether a worktree is a prune candidate: not default, not
-// the cwd, and either merged into origin/default or its upstream is gone.
-func pruneConsider(p *project.Project, w project.Worktree, def, cwd string) bool {
+// pruneReason returns why a worktree is a prune candidate ("merged", "squashed",
+// or "gone"), or "" when it should be kept. A worktree is never a candidate when
+// it is bare, has no branch, is the default branch, or is the current directory.
+func pruneReason(p *project.Project, w project.Worktree, def, cwd string) string {
 	if w.Path == "" || w.Branch == "" || w.Bare {
-		return false
+		return ""
 	}
 	if w.Branch == def || w.Path == cwd {
-		return false
+		return ""
 	}
-	if branchMerged(p, w.Branch, "origin/"+def) {
-		return true
+	into := "origin/" + def
+	if branchMerged(p, w.Branch, into) {
+		return "merged"
 	}
-	// Upstream still present? not a candidate.
+	// Squash/rebase merges rewrite history, so ancestry misses them; fall back
+	// to patch-equivalence against origin/default.
+	if p.BranchSquashMerged(w.Branch, into) {
+		return "squashed"
+	}
+	// Upstream still present? keep.
 	if project.GitQuiet(p.Base, "rev-parse", "--verify", "--quiet", w.Branch+"@{upstream}") {
-		return false
+		return ""
 	}
 	// Was configured to track a remote (now gone)? candidate.
-	return project.GitQuiet(p.Base, "config", "--get", "branch."+w.Branch+".remote")
+	if project.GitQuiet(p.Base, "config", "--get", "branch."+w.Branch+".remote") {
+		return "gone"
+	}
+	return ""
 }
 
 func branchMerged(p *project.Project, branch, into string) bool {
