@@ -228,6 +228,21 @@ func (p *Project) ReconcileStale() []string {
 // Worktree creation
 // ---------------------------------------------------------------------------
 
+// setUpstream configures branch.<name>.remote/merge so a plain `git push` (or
+// `git pull`) on branch targets origin/<branch> without needing --set-upstream.
+// git only wires this up automatically when a branch is created from an existing
+// remote-tracking ref (e.g. `worktree add --track`); grove sets it explicitly for
+// its other creation paths — brand-new branches, pre-existing local branches, and
+// the default branch materialized by clone — so every grove branch is pushable out
+// of the box. It never clobbers an upstream the branch already has.
+func setUpstream(base, branch string) {
+	if GitQuiet(base, "config", "--get", "branch."+branch+".merge") {
+		return
+	}
+	_ = Git(base, "config", "branch."+branch+".remote", "origin")
+	_ = Git(base, "config", "branch."+branch+".merge", "refs/heads/"+branch)
+}
+
 // EnsureWorktree returns the worktree dir for branch, creating it off the latest
 // default branch if needed. copyFiles are untracked files copied from the
 // default-branch worktree into freshly created ones. The returned bool reports
@@ -261,6 +276,7 @@ func (p *Project) EnsureWorktree(branch string, copyFiles []string) (string, boo
 		if err := Git(p.Base, "worktree", "add", dir, branch); err != nil {
 			return "", false, fmt.Errorf("worktree add failed")
 		}
+		setUpstream(p.Base, branch)
 	case GitQuiet(p.Base, "show-ref", "--verify", "--quiet", "refs/remotes/origin/"+branch):
 		ui.Info(fmt.Sprintf("Creating worktree tracking origin/%s at %s", branch, dir))
 		if err := Git(p.Base, "worktree", "add", "--track", "-b", branch, dir, "origin/"+branch); err != nil {
@@ -277,8 +293,7 @@ func (p *Project) EnsureWorktree(branch string, copyFiles []string) (string, boo
 		if err := Git(p.Base, "worktree", "add", "--no-track", "-b", branch, dir, baseRef); err != nil {
 			return "", false, fmt.Errorf("worktree add failed")
 		}
-		_ = Git(p.Base, "config", "branch."+branch+".remote", "origin")
-		_ = Git(p.Base, "config", "branch."+branch+".merge", "refs/heads/"+branch)
+		setUpstream(p.Base, branch)
 	}
 
 	p.setupWorktree(dir, copyFiles)
@@ -324,6 +339,7 @@ func Clone(url, folder string, copyFiles []string) (proj *Project, dir, branch s
 	if err := Git(base, "worktree", "add", dir, branch); err != nil {
 		return nil, "", "", fmt.Errorf("worktree add failed")
 	}
+	setUpstream(base, branch)
 	p.setupWorktree(dir, copyFiles)
 	return p, dir, branch, nil
 }

@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -217,4 +218,90 @@ func TestBranchSquashMerged(t *testing.T) {
 			t.Errorf("BranchSquashMerged(%q, main) = %v, want %v", c.branch, got, c.want)
 		}
 	}
+}
+
+// gitConfig reads a single config value from base, returning "" when unset. Used
+// to assert the branch.<name>.remote/merge that make a branch pushable.
+func gitConfig(t *testing.T, base, key string) string {
+	t.Helper()
+	out, err := GitOut(base, "config", "--get", key)
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(out)
+}
+
+// assertTracksOrigin asserts branch is configured to push/pull against
+// origin/<branch> — the tracking grove sets so a plain `git push` needs no
+// --set-upstream.
+func assertTracksOrigin(t *testing.T, base, branch string) {
+	t.Helper()
+	if got := gitConfig(t, base, "branch."+branch+".remote"); got != "origin" {
+		t.Errorf("branch.%s.remote = %q, want origin", branch, got)
+	}
+	if got := gitConfig(t, base, "branch."+branch+".merge"); got != "refs/heads/"+branch {
+		t.Errorf("branch.%s.merge = %q, want refs/heads/%s", branch, got, branch)
+	}
+}
+
+// TestEnsureWorktreeSetsUpstream covers the two creation paths that historically
+// left a branch with no upstream (so `git push` failed): a brand-new branch and a
+// pre-existing local branch. Both should end up tracking origin/<branch>.
+func TestEnsureWorktreeSetsUpstream(t *testing.T) {
+	p := newTestProject(t)
+
+	// Path: brand-new branch off the default.
+	if _, _, err := p.EnsureWorktree("feature/new", nil); err != nil {
+		t.Fatalf("EnsureWorktree(feature/new): %v", err)
+	}
+	assertTracksOrigin(t, p.Base, "feature/new")
+
+	// Path: a local branch that already exists in the bare repo with no tracking
+	// config (e.g. carried over from a full clone).
+	runGit(t, p.Base, "branch", "local/only", "main")
+	if _, _, err := p.EnsureWorktree("local/only", nil); err != nil {
+		t.Fatalf("EnsureWorktree(local/only): %v", err)
+	}
+	assertTracksOrigin(t, p.Base, "local/only")
+}
+
+// TestEnsureWorktreeKeepsExistingUpstream verifies grove never clobbers an
+// upstream a branch was already deliberately configured to track.
+func TestEnsureWorktreeKeepsExistingUpstream(t *testing.T) {
+	p := newTestProject(t)
+	runGit(t, p.Base, "branch", "tracked", "main")
+	runGit(t, p.Base, "config", "branch.tracked.remote", "upstream")
+	runGit(t, p.Base, "config", "branch.tracked.merge", "refs/heads/somewhere")
+
+	if _, _, err := p.EnsureWorktree("tracked", nil); err != nil {
+		t.Fatalf("EnsureWorktree(tracked): %v", err)
+	}
+	if got := gitConfig(t, p.Base, "branch.tracked.remote"); got != "upstream" {
+		t.Errorf("branch.tracked.remote = %q, want upstream (pre-existing, not clobbered)", got)
+	}
+	if got := gitConfig(t, p.Base, "branch.tracked.merge"); got != "refs/heads/somewhere" {
+		t.Errorf("branch.tracked.merge = %q, want refs/heads/somewhere (pre-existing, not clobbered)", got)
+	}
+}
+
+// TestCloneSetsUpstreamOnDefaultBranch verifies the default-branch worktree
+// created by clone is pushable: a bare clone leaves no branch tracking config, so
+// grove wires it up itself.
+func TestCloneSetsUpstreamOnDefaultBranch(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+	root := t.TempDir()
+	src := filepath.Join(root, "src")
+	if err := os.MkdirAll(src, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, src, "init", "-q")
+	runGit(t, src, "commit", "-q", "--allow-empty", "-m", "init")
+
+	p, _, branch, err := Clone(src, filepath.Join(root, "proj"), nil)
+	if err != nil {
+		t.Fatalf("Clone: %v", err)
+	}
+	assertTracksOrigin(t, p.Base, branch)
 }
