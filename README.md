@@ -54,7 +54,7 @@ make install          # builds + installs to ~/.local/bin
 | Command | Description |
 |---------|-------------|
 | `grove clone GIT_URL [FOLDER]` | Clone a repo as a bare `.base` plus a worktree for the default branch under `FOLDER` in the current directory, and seed a starter (commented) `grove.jsonc` |
-| `grove BRANCH` | Switch to (or create) BRANCH's worktree and run the recipes in `grove.json` |
+| `grove BRANCH [--from REF]` | Switch to (or create) BRANCH's worktree and run the recipes in `grove.json`. When BRANCH is new, `--from REF` bases it off REF (see [Choosing the base branch](#choosing-the-base-branch-for-new-branches)) |
 | `grove open [BRANCH] [TYPES] [--force]` | Open BRANCH (or the current worktree's branch if omitted/`.`); `TYPES` (comma-separated) filters the configured recipes to those types; `--force` re-runs one-time recipes |
 | `grove switch [BRANCH]` | Like a bare BRANCH; with no branch and `fzf` installed, opens a picker |
 | `grove path BRANCH` | Resolve (creating if needed) BRANCH's worktree and print its absolute path to stdout |
@@ -77,6 +77,31 @@ those changes and remove it anyway. `grove prune` lists its candidates (flagging
 any with local changes) and, once you confirm at the prompt, discards those
 changes and removes them. The branch ref is always kept, so nothing committed is
 lost.
+
+### Choosing the base branch for new branches
+
+`grove BRANCH` reuses an existing branch when it finds one — locally, or on
+`origin` (fetched and tracked). Only when the branch exists nowhere does grove
+create it, and then it has to pick a starting point.
+
+- On the **default branch** (the common case), grove bases the new branch off
+  the default branch, exactly as before.
+- On a **non-default branch** (e.g. you're on `feature/a` and run
+  `grove feature/b`), the base is ambiguous, so grove **asks** which branch to
+  branch off — every project branch is offered, with the default and current
+  branches surfaced first. With `fzf` installed you get the picker; otherwise a
+  numbered menu that also accepts a typed branch name.
+
+Pass `--from REF` to name the base branch up front and skip the prompt (works
+with `grove BRANCH`, `grove open`, and `grove path`). This is also what runs in
+non-interactive contexts — scripts, pipes, and non-TTY SSH commands never block
+on the prompt; without `--from` they fall back to the default branch.
+
+```sh
+grove feature/b                 # on a non-default branch: prompts for the base
+grove feature/b --from main     # base off main, no prompt
+grove feature/b --from feature/a  # stack feature/b on top of feature/a
+```
 
 ## Recipes
 
