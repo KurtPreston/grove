@@ -13,6 +13,7 @@
 package main
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -331,10 +332,14 @@ func cmdPrune(args []string) {
 
 	wts, _ := p.Worktrees()
 	cwd := mustGetwd()
+	var forgeMerged map[string]bool
+	if cfg.ForgeEnabled() {
+		forgeMerged = forgeMergedBranches(p, cfg)
+	}
 	type cand struct{ branch, path, reason string }
 	var candidates []cand
 	for _, w := range wts {
-		if r := pruneReason(p, w, def, cwd, cfg); r != "" {
+		if r := pruneReason(p, w, def, cwd, cfg, forgeMerged); r != "" {
 			candidates = append(candidates, cand{w.Branch, w.Path, r})
 		}
 	}
@@ -378,7 +383,7 @@ func cmdPrune(args []string) {
 // pruneReason returns why a worktree is a prune candidate ("merged", "squashed",
 // or "gone"), or "" when it should be kept. A worktree is never a candidate when
 // it is bare, has no branch, is the default branch, or is the current directory.
-func pruneReason(p *project.Project, w project.Worktree, def, cwd string, cfg config.Config) string {
+func pruneReason(p *project.Project, w project.Worktree, def, cwd string, cfg config.Config, forgeMerged map[string]bool) string {
 	if w.Path == "" || w.Branch == "" || w.Bare {
 		return ""
 	}
@@ -394,6 +399,10 @@ func pruneReason(p *project.Project, w project.Worktree, def, cwd string, cfg co
 	if cfg.SquashDetectionEnabled() && p.BranchSquashMerged(w.Branch, into) {
 		return "squashed"
 	}
+	// Authoritative merged-PR state from the forge, when configured.
+	if forgeMerged[w.Branch] {
+		return "forge"
+	}
 	// Upstream still present? keep.
 	if project.GitQuiet(p.Base, "rev-parse", "--verify", "--quiet", w.Branch+"@{upstream}") {
 		return ""
@@ -403,6 +412,49 @@ func pruneReason(p *project.Project, w project.Worktree, def, cwd string, cfg co
 		return "gone"
 	}
 	return ""
+}
+
+// forgeMergedBranches returns the set of head-branch names whose PRs are merged,
+// according to the forge (via gh). It returns nil (warning once) when the repo
+// can't be resolved, gh is unavailable, or the query fails, so prune falls back
+// to git-only detection.
+func forgeMergedBranches(p *project.Project, cfg config.Config) map[string]bool {
+	repo := cfg.ForgeRepo()
+	if repo == "" {
+		repo = p.OriginRepoSlug()
+	}
+	if repo == "" {
+		ui.Warn("prune.forge: could not determine origin repo; skipping forge check.")
+		return nil
+	}
+	if _, err := exec.LookPath("gh"); err != nil {
+		ui.Warn("prune.forge: gh not found on PATH; skipping forge check.")
+		return nil
+	}
+	out, err := exec.Command("gh", "pr", "list",
+		"--repo", repo,
+		"--state", "merged",
+		"--limit", "200",
+		"--json", "headRefName",
+	).Output()
+	if err != nil {
+		ui.Warn("prune.forge: 'gh pr list' failed; skipping forge check.")
+		return nil
+	}
+	var prs []struct {
+		HeadRefName string `json:"headRefName"`
+	}
+	if err := json.Unmarshal(out, &prs); err != nil {
+		ui.Warn("prune.forge: could not parse gh output; skipping forge check.")
+		return nil
+	}
+	merged := make(map[string]bool, len(prs))
+	for _, pr := range prs {
+		if pr.HeadRefName != "" {
+			merged[pr.HeadRefName] = true
+		}
+	}
+	return merged
 }
 
 func branchMerged(p *project.Project, branch, into string) bool {

@@ -403,6 +403,64 @@ func (p *Project) BranchSquashMerged(branch, into string) bool {
 	return strings.HasPrefix(strings.TrimSpace(out), "-")
 }
 
+// OriginRepoSlug returns the "host/owner/repo" slug for the origin remote,
+// suitable for `gh --repo`, or "" when it cannot be determined.
+func (p *Project) OriginRepoSlug() string {
+	out, err := GitOut(p.Base, "remote", "get-url", "origin")
+	if err != nil {
+		return ""
+	}
+	return RepoSlugFromURL(strings.TrimSpace(out))
+}
+
+// RepoSlugFromURL parses a git remote URL into a "host/owner/repo" slug (no
+// scheme, user, port, or .git suffix), or "" if it does not look like one. It
+// handles scp-like SSH (git@host:owner/repo.git) and scheme URLs
+// (https://host/owner/repo, ssh://git@host:22/owner/repo).
+func RepoSlugFromURL(url string) string {
+	s := strings.TrimSpace(url)
+	if s == "" {
+		return ""
+	}
+	s = strings.TrimSuffix(s, ".git")
+
+	// scp-like syntax has no scheme: [user@]host:owner/repo
+	if !strings.Contains(s, "://") {
+		if at := strings.LastIndex(s, "@"); at != -1 {
+			s = s[at+1:]
+		}
+		i := strings.Index(s, ":")
+		if i == -1 {
+			return ""
+		}
+		host := s[:i]
+		path := strings.TrimPrefix(s[i+1:], "/")
+		if host == "" || path == "" {
+			return ""
+		}
+		return host + "/" + path
+	}
+
+	// scheme://[user@]host[:port]/owner/repo
+	rest := s[strings.Index(s, "://")+3:]
+	if at := strings.LastIndex(rest, "@"); at != -1 {
+		rest = rest[at+1:]
+	}
+	slash := strings.Index(rest, "/")
+	if slash == -1 {
+		return ""
+	}
+	host := rest[:slash]
+	if i := strings.Index(host, ":"); i != -1 {
+		host = host[:i]
+	}
+	path := strings.TrimPrefix(rest[slash+1:], "/")
+	if host == "" || path == "" {
+		return ""
+	}
+	return host + "/" + path
+}
+
 // AddLocalExclude adds a gitignore pattern to the worktree's info/exclude so
 // grove's generated artifacts don't show up as dirty in `git status`.
 func AddLocalExclude(dir, pattern string) {
