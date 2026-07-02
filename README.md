@@ -76,7 +76,7 @@ echo 'source "/path/to/grove/shell/grove.fish"' >> ~/.config/fish/config.fish
 | `grove path BRANCH` | Resolve (creating if needed) BRANCH's worktree and print its absolute path to stdout |
 | `grove tmux` | Attach the project's tmux session, building a window for every worktree |
 | `grove list` / `ls [--porcelain]` | List worktrees; `--porcelain` prints `branch<TAB>path` to stdout |
-| `grove prune [--dry-run]` | Remove worktrees whose branches are merged (including squash/rebase merges) or whose upstream is gone (keeps branch refs); skips any with local changes. `--dry-run`/`-n` lists candidates without removing anything |
+| `grove prune [--dry-run]` | Remove worktrees whose branches are merged (including squash/rebase merges) or whose upstream is gone (keeps branch refs); confirming at the prompt discards any local changes in those worktrees. `--dry-run`/`-n` lists candidates without removing anything |
 | `grove rm BRANCH [--force]` | Remove a single worktree (keeps the branch ref); `--force` discards local changes |
 | `grove color BRANCH` | Print the deterministic color for a branch |
 | `grove launch` / `here [DIR]` | Run the user-level recipes for `DIR` (or cwd) without a worktree (see [Launching any folder](#launching-any-folder)) |
@@ -85,11 +85,14 @@ echo 'source "/path/to/grove/shell/grove.fish"' >> ~/.config/fish/config.fish
 `grove path` and `grove ls --porcelain` write only their result to stdout (all
 status/log output goes to stderr), so external tooling can drive grove over SSH.
 
-`grove rm`/`grove prune` remove a **clean** worktree even when it contains
-submodules — plain `git worktree remove` refuses those, so grove clears git's
-submodule guard for you. A worktree with local changes (including modified
+`grove rm`/`grove prune` remove a worktree even when it contains submodules —
+plain `git worktree remove` refuses those, so grove clears git's submodule guard
+for you. For `grove rm`, a worktree with local changes (including modified
 submodule content) is left in place; pass `grove rm BRANCH --force` to discard
-those changes and remove it anyway.
+those changes and remove it anyway. `grove prune` lists its candidates (flagging
+any with local changes) and, once you confirm at the prompt, discards those
+changes and removes them. The branch ref is always kept, so nothing committed is
+lost.
 
 ## Recipes
 
@@ -316,8 +319,9 @@ and uses the defaults.
 
 ### Prune detection
 
-`grove prune` keeps branch refs and only removes clean worktrees. A worktree is
-a candidate when its branch is:
+`grove prune` keeps branch refs; candidates with local changes are flagged in
+the list, and confirming removal discards those changes. A worktree is a
+candidate when its branch is:
 
 - **merged** — an ancestor of `origin/<default>` (`git branch --merged`);
 - **squashed** — its net diff already exists in `origin/<default>`, detected via

@@ -336,11 +336,19 @@ func cmdPrune(args []string) {
 	if cfg.ForgeEnabled() {
 		forgeMerged = forgeMergedBranches(p, cfg)
 	}
-	type cand struct{ branch, path, reason string }
+	type cand struct {
+		branch, path, reason string
+		dirty                bool
+	}
 	var candidates []cand
+	dirtyCount := 0
 	for _, w := range wts {
 		if r := pruneReason(p, w, def, cwd, cfg, forgeMerged); r != "" {
-			candidates = append(candidates, cand{w.Branch, w.Path, r})
+			dirty := !p.WorktreeClean(w.Path)
+			if dirty {
+				dirtyCount++
+			}
+			candidates = append(candidates, cand{w.Branch, w.Path, r, dirty})
 		}
 	}
 	if len(candidates) == 0 {
@@ -350,14 +358,22 @@ func cmdPrune(args []string) {
 
 	ui.Log("The following worktrees are merged or gone (branch refs are kept):")
 	for _, c := range candidates {
-		fmt.Fprintf(os.Stderr, "  %s %-28s %s%s%s\n",
+		fmt.Fprintf(os.Stderr, "  %s %-28s %s%s%s",
 			color.Swatch(color.ForBranch(c.branch)), c.branch, ui.Dim, c.reason, ui.Reset)
+		if c.dirty {
+			fmt.Fprintf(os.Stderr, " %slocal changes will be discarded%s", ui.Yellow, ui.Reset)
+		}
+		fmt.Fprintln(os.Stderr)
 	}
 	if dry {
 		ui.Info("Dry run; no worktrees removed.")
 		return
 	}
-	fmt.Fprint(os.Stderr, "Remove these worktree directories? [y/N] ")
+	prompt := "Remove these worktree directories? [y/N] "
+	if dirtyCount > 0 {
+		prompt = fmt.Sprintf("Remove these worktree directories? %d have local changes that will be discarded. [y/N] ", dirtyCount)
+	}
+	fmt.Fprint(os.Stderr, prompt)
 	if !readYes() {
 		ui.Info("Aborted.")
 		return
@@ -368,9 +384,9 @@ func cmdPrune(args []string) {
 		if tmux.Has() {
 			tmux.KillWindow(session, project.Sanitize(c.branch))
 		}
-		switch err := p.RemoveWorktree(c.path, false); {
-		case errors.Is(err, project.ErrWorktreeDirty):
-			ui.Warn(fmt.Sprintf("%s has local changes; use 'grove rm %s --force' to remove it.", c.path, c.branch))
+		// The user confirmed removal at the prompt, so force past any local
+		// changes; the branch ref is kept regardless.
+		switch err := p.RemoveWorktree(c.path, true); {
 		case err != nil:
 			ui.Warn(fmt.Sprintf("Could not remove %s: %v", c.path, err))
 		default:
