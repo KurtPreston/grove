@@ -130,6 +130,10 @@ type Worktree struct {
 	Head     string
 	Bare     bool
 	Detached bool
+	// Prunable is set when git reports the worktree as removable because its
+	// directory no longer exists on disk (e.g. a user ran `rm -rf` on the folder
+	// instead of `grove rm`). Locked worktrees are never reported prunable.
+	Prunable bool
 }
 
 // Worktrees parses the porcelain worktree list for this project.
@@ -160,6 +164,8 @@ func (p *Project) Worktrees() ([]Worktree, error) {
 			cur.Bare = true
 		case line == "detached":
 			cur.Detached = true
+		case line == "prunable" || strings.HasPrefix(line, "prunable "):
+			cur.Prunable = true
 		case line == "":
 			flush()
 		}
@@ -180,6 +186,42 @@ func (p *Project) WorktreePathFor(branch string) (string, bool) {
 		}
 	}
 	return "", false
+}
+
+// ReconcileStale drops git's leftover bookkeeping for worktrees whose folders no
+// longer exist on disk — the common case being a user running `rm -rf` on a
+// worktree directory instead of `grove rm`. Without this, git keeps listing the
+// vanished worktree (so it shows up in `grove list`) and refuses to re-create a
+// worktree for that branch because it still thinks it is checked out.
+//
+// It reconciles only entries git itself reports as prunable (directory gone and
+// not locked) and delegates the cleanup to `git worktree prune`, which keeps
+// branch refs — matching grove's removal philosophy. Locked worktrees (e.g. on
+// removable media) are left untouched. It returns the names of the reconciled
+// worktrees (branch name, or the folder basename for detached ones).
+func (p *Project) ReconcileStale() []string {
+	wts, err := p.Worktrees()
+	if err != nil {
+		return nil
+	}
+	var stale []string
+	for _, w := range wts {
+		if w.Bare || !w.Prunable {
+			continue
+		}
+		name := w.Branch
+		if name == "" {
+			name = filepath.Base(w.Path)
+		}
+		stale = append(stale, name)
+	}
+	if len(stale) == 0 {
+		return nil
+	}
+	if !GitQuiet(p.Base, "worktree", "prune") {
+		return nil
+	}
+	return stale
 }
 
 // ---------------------------------------------------------------------------

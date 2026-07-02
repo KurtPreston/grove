@@ -589,7 +589,26 @@ func mustResolve() *project.Project {
 	if err != nil {
 		ui.Die(err.Error())
 	}
+	reconcileStale(p)
 	return p
+}
+
+// reconcileStale clears git's leftover bookkeeping for worktree folders deleted
+// outside grove (e.g. `rm -rf`), so every command works from what's actually on
+// disk. It runs on project resolution rather than only in `grove list` so that
+// reused-branch flows (switch/open/path) don't trip over a vanished worktree
+// that git still thinks is checked out. Branch refs are kept.
+func reconcileStale(p *project.Project) {
+	pruned := p.ReconcileStale()
+	if len(pruned) == 0 {
+		return
+	}
+	noun := "worktree"
+	if len(pruned) > 1 {
+		noun = "worktrees"
+	}
+	ui.Info(fmt.Sprintf("Reconciled %d removed %s: %s (branch refs kept).",
+		len(pruned), noun, strings.Join(pruned, ", ")))
 }
 
 func mustGetwd() string {
@@ -676,6 +695,10 @@ Usage:
   grove help                     Show this help
 
 Pass --force to open/switch to re-run create-only recipes ("onOpen": false) on an existing worktree.
+
+Worktree folders deleted outside grove (e.g. 'rm -rf') are reconciled automatically
+on the next command: grove drops git's stale bookkeeping so the worktree stops
+showing up and the branch can be checked out again. Branch refs are always kept.
 
 Configuration lives in grove.json (or grove.jsonc, with comments/trailing commas)
 at the project root (beside .base), validated by grove.schema.json. It declares an
