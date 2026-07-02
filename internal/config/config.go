@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"strconv"
 
+	"grove/examples"
 	"grove/internal/ui"
 )
 
@@ -24,40 +25,6 @@ const Filename = "grove.json"
 // SeedFilename is the config file `grove clone` writes for a fresh project: a
 // commented grove.jsonc.
 const SeedFilename = "grove.jsonc"
-
-// SchemaURL is the canonical location of grove.schema.json, referenced from the
-// "$schema" key of seeded config files for editor validation.
-const SchemaURL = "https://raw.githubusercontent.com/KurtPreston/grove/main/grove.schema.json"
-
-// starter is the commented grove.jsonc written by Seed for a fresh project. It
-// leans on JSONC (comments + trailing commas) to ship ready-to-uncomment
-// example recipes alongside the defaults.
-const starter = `{
-  // grove project config. This is JSONC: // and /* */ comments and trailing
-  // commas are allowed. The $schema below powers editor autocomplete + linting.
-  "$schema": "` + SchemaURL + `",
-
-  // Untracked files copied from the default-branch worktree into new worktrees.
-  "copy": [".env"],
-
-  // Recipes run in order when you open a branch. Each entry has a "type" plus
-  // that type's settings, and may set "onCreate"/"onOpen" (both default true)
-  // to control when it runs.
-  "recipes": [
-    // Write the branch color into .vscode/settings.json (VSCode/Cursor).
-    { "type": "vscode-color-config" },
-
-    // Per-project setup, run once when a worktree is first created:
-    // { "type": "command", "command": "nvm use && yarn install && yarn build", "onOpen": false },
-
-    // Open/focus a window on your workstation over a reverse SSH tunnel:
-    // { "type": "webhook", "url": "http://127.0.0.1:39788/open", "token": "$GROVE_WEBHOOK_TOKEN", "params": { "host": "devbox", "path": "$GROVE_DIR", "name": "$GROVE_NAME" } },
-
-    // Ensure a tmux session with one window per worktree, then attach.
-    { "type": "tmux", "layout": "shell=,claude=claude" }
-  ]
-}
-`
 
 // Config is the parsed grove.json. Top-level fields hold the few settings that
 // are not specific to a single recipe; everything else lives on the per-recipe
@@ -212,7 +179,7 @@ func Seed(projectDir string) error {
 			return nil
 		}
 	}
-	return os.WriteFile(filepath.Join(projectDir, SeedFilename), []byte(starter), 0o644)
+	return os.WriteFile(filepath.Join(projectDir, SeedFilename), []byte(examples.Starter), 0o644)
 }
 
 // validate emits warnings for recipe entries that are missing the fields their

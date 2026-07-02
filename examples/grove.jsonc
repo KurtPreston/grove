@@ -1,0 +1,28 @@
+{
+  // grove project config. This is JSONC: // and /* */ comments and trailing
+  // commas are allowed. The $schema below powers editor autocomplete + linting.
+  "$schema": "https://raw.githubusercontent.com/KurtPreston/grove/main/grove.schema.json",
+
+  // Untracked files copied from the default-branch worktree into new worktrees.
+  "copy": [".env"],
+
+  // Recipes run in order when you open a branch. Each entry has a "type" plus
+  // that type's settings, and may set "onCreate"/"onOpen" (both default true)
+  // to control when it runs. See the other files in this folder for more.
+  "recipes": [
+    // Generate a custom branch color, and write it to .vscode/settings.json for VSCode/Cursor themeing:
+    { "type": "vscode-color-config" },
+
+    // Open the worktree in Cursor:
+    // { "type": "command", "command": "cursor $GROVE_DIR" },
+
+    // Open/focus a window on your workstation over a reverse SSH tunnel (see wsm-remote.jsonc):
+    // { "type": "webhook", "url": "http://127.0.0.1:39788/open", "token": "$GROVE_WEBHOOK_TOKEN", "params": { "host": "devbox", "path": "$GROVE_DIR", "name": "$GROVE_NAME" } },
+
+    // Ensure a tmux session with one window per worktree, then attach.
+    // { "type": "tmux", "layout": "shell=,claude=claude" }
+
+    // Commands to bootstrap the branch. "onOpen: false" means it will only run once, when the worktree is created
+    // { "type": "command", "command": "npm install", "onOpen": false },
+  ]
+}

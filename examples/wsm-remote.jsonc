@@ -1,0 +1,28 @@
+{
+  // Remote workflow: you SSH into a dev box and run grove there, while your
+  // editor/desktop lives on your workstation. A reverse SSH tunnel
+  // (add `RemoteForward 39788 127.0.0.1:39788` to the host's ~/.ssh/config)
+  // forwards this webhook to wsm (https://github.com/KurtPreston/wsm) running
+  // on the workstation, which opens/focuses a Cursor window there.
+  "$schema": "https://raw.githubusercontent.com/KurtPreston/grove/main/grove.schema.json",
+  "copy": [".env"],
+  "recipes": [
+    { "type": "vscode-color-config" },
+
+    // POST { host, path, name } as JSON to wsm's /open endpoint. String values
+    // are $VAR-expanded from grove's context env before the request is sent, so
+    // $GROVE_DIR / $GROVE_NAME resolve to this worktree. wsm requires the bearer
+    // token in all modes; keep it here (machine-local, never committed) or in an
+    // env var referenced as "$GROVE_WEBHOOK_TOKEN".
+    {
+      "type": "webhook",
+      "url": "http://127.0.0.1:39788/open",
+      "token": "$GROVE_WEBHOOK_TOKEN",
+      "params": {
+        "host": "devbox",
+        "path": "$GROVE_DIR",
+        "name": "$GROVE_NAME"
+      }
+    }
+  ]
+}

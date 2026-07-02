@@ -263,8 +263,10 @@ machine-specific values (a webhook token, an SSH host alias). grove reads
 `grove.jsonc` in preference to `grove.json`, and either extension tolerates `//`
 and `/* */` comments plus trailing commas. `grove clone` seeds a starter
 `grove.jsonc` (commented, with ready-to-uncomment example recipes); edit it to
-taste. It is validated by [`grove.schema.json`](grove.schema.json); add a
-`$schema` reference for editor autocomplete and inline validation.
+taste. See [`examples/`](examples/) for copy-paste configs (e.g. driving wsm
+over a reverse SSH tunnel). It is validated by
+[`grove.schema.json`](grove.schema.json); add a `$schema` reference for editor
+autocomplete and inline validation.
 
 ```json
 {
