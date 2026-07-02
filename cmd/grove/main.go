@@ -313,8 +313,8 @@ func printRow(p *project.Project, session string, w project.Worktree) {
 		dirty = ui.Yellow + "*" + ui.Reset
 	}
 
-	fmt.Fprintf(os.Stderr, "%s  %s  %s %-26s %s%s%s\n",
-		sw, tmuxMark, dirty, branch, ui.Dim, w.Path, ui.Reset)
+	fmt.Fprintf(os.Stderr, "%s  %s  %s %s\n",
+		sw, tmuxMark, dirty, branch)
 }
 
 func cmdPrune(args []string) {
@@ -350,8 +350,8 @@ func cmdPrune(args []string) {
 
 	ui.Log("The following worktrees are merged or gone (branch refs are kept):")
 	for _, c := range candidates {
-		fmt.Fprintf(os.Stderr, "  %s %-28s %s%-9s %s%s\n",
-			color.Swatch(color.ForBranch(c.branch)), c.branch, ui.Dim, c.reason, c.path, ui.Reset)
+		fmt.Fprintf(os.Stderr, "  %s %-28s %s%s%s\n",
+			color.Swatch(color.ForBranch(c.branch)), c.branch, ui.Dim, c.reason, ui.Reset)
 	}
 	if dry {
 		ui.Info("Dry run; no worktrees removed.")
