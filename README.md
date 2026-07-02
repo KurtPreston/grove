@@ -21,15 +21,38 @@ Responsibilities are deliberately separated:
 
 ## Install
 
-Requires Go (to build), plus `git` at runtime. `tmux` enables the `tmux` recipe,
-`fzf` enables the interactive picker.
+At runtime grove needs `git`; `tmux` enables the `tmux` recipe and `fzf` enables
+the interactive picker.
+
+### Prebuilt binary (no Go)
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/KurtPreston/grove/main/install.sh | bash
+```
+
+This downloads the latest release for your OS/arch, installs the `grove` binary to
+`~/.local/bin`, and drops the shell-integration scripts into `~/.local/share/grove/`.
+Set `GROVE_VERSION=vX.Y.Z` to pin a version or `PREFIX=...` to change where the
+binary lands. You can also download an archive by hand from the
+[releases page](https://github.com/KurtPreston/grove/releases).
+
+Then add the shell integration (needed so `grove` can `cd` your shell):
+
+```sh
+# bash/zsh
+echo 'source "$HOME/.local/share/grove/grove.bash"' >> ~/.bashrc
+# fish
+echo 'source "$HOME/.local/share/grove/grove.fish"' >> ~/.config/fish/config.fish
+```
+
+### Build from source (requires Go)
 
 ```sh
 git clone <this-repo> grove && cd grove
-./install.sh          # builds + installs to ~/.local/bin, prints shell setup
+make install          # builds + installs to ~/.local/bin
 ```
 
-Then add the shell integration (needed so `grove` can `cd` your shell):
+Source the integration script from your checkout instead:
 
 ```sh
 # bash/zsh
