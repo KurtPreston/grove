@@ -82,19 +82,38 @@ Built-in recipes:
 | `tmux` | `layout` | Ensures a per-project tmux session with one window per worktree (colored), one pane per `layout` entry, then attaches/switches |
 | `vscode-color-config` | — | Writes the branch color into the worktree's `.vscode/settings.json` (shared by VSCode and Cursor) and keeps it out of `git status` |
 | `webhook` | `url`, `token`, `params` | POSTs `params` as JSON to `url` (string values support `$VAR` env substitution) |
-| `bootstrap` | `command`, `shell` | Runs `command` (e.g. `nvm use && yarn install && yarn build`) **once**, the first time a worktree is created |
+| `command` | `command`, `shell` | Runs `command` in the worktree through a login shell. Pair with `"onOpen": false` to run it **once**, only when the worktree is first created |
 
-### `bootstrap`: per-project setup on new worktrees
+### When recipes run: `onCreate` / `onOpen`
 
-The `bootstrap` recipe runs its `command` the **first time a worktree is
-created** (a no-op when you re-open an existing one, and a no-op when no
-`command` is set). Put `bootstrap` *before* `tmux` in the recipes array so it
-runs before tmux takes over the terminal:
+Every recipe accepts two boolean flags that gate when it runs. Both **default to
+`true`**:
+
+- `onCreate` — run when a worktree is **freshly created**.
+- `onOpen` — run on **every open**: creating, reopening, or a plain-folder
+  `grove launch`/`here`.
+
+Creating a worktree counts as both creating *and* opening it, so a fresh create
+runs any recipe that has either flag set. The practical patterns are:
+
+- **Default** (neither flag set): runs every time you open the branch.
+- **Create-only** (`"onOpen": false`): runs only when the worktree is first
+  created — the old `bootstrap` behavior.
+
+`--force` on `grove open`/`switch` re-runs create-only recipes on a worktree that
+already exists.
+
+### `command`: run a shell command (e.g. per-project setup)
+
+The `command` recipe runs its `command` in the worktree through a **login shell**
+(a no-op when no `command` is set). For one-time setup on new worktrees, add
+`"onOpen": false` and put it *before* `tmux` so it runs before tmux takes over
+the terminal:
 
 ```json
 {
   "recipes": [
-    { "type": "bootstrap", "command": "nvm use && yarn install && yarn build" },
+    { "type": "command", "command": "nvm use && yarn install && yarn build", "onOpen": false },
     { "type": "vscode-color-config" },
     { "type": "tmux" }
   ]
@@ -104,12 +123,12 @@ runs before tmux takes over the terminal:
 Now `grove some-branch` in that project creates the worktree and runs the command
 in it once. Notes:
 
-- The command runs in the **new worktree directory** through a **login shell**
+- The command runs in the **worktree directory** through a **login shell**
   (`bash -l` by default) so your shell environment is sourced — that is what
   makes shell functions like `nvm use` work in a non-interactive run. Override
   the interpreter with the recipe's `shell` field (e.g. `"shell": "zsh"`).
-- To re-run bootstrap on a worktree that already exists, pass `--force` to
-  `grove open`/`switch`.
+- Drop `"onOpen": false` (or set it `true`) to run the command on every open, not
+  just on creation.
 
 ### `webhook`: generic HTTP POST
 
@@ -240,17 +259,18 @@ Notes:
 
 All configuration lives in a single `grove.json` at the project root, **beside
 `.base`** — not inside a worktree, so it is never committed and can safely hold
-machine-specific values (a webhook token, an SSH host alias). `grove clone`
-seeds a starter file; edit it to taste. It is validated by
-[`grove.schema.json`](grove.schema.json); add a `$schema` reference for editor
-autocomplete and inline validation.
+machine-specific values (a webhook token, an SSH host alias). grove also reads
+`grove.jsonc` (preferred when both exist), and either extension tolerates `//`
+and `/* */` comments plus trailing commas. `grove clone` seeds a starter file;
+edit it to taste. It is validated by [`grove.schema.json`](grove.schema.json);
+add a `$schema` reference for editor autocomplete and inline validation.
 
 ```json
 {
   "$schema": "https://raw.githubusercontent.com/KurtPreston/grove/main/grove.schema.json",
   "copy": [".env"],
   "recipes": [
-    { "type": "bootstrap", "command": "nvm use && yarn install && yarn build" },
+    { "type": "command", "command": "nvm use && yarn install && yarn build", "onOpen": false },
     { "type": "vscode-color-config" },
     { "type": "webhook", "url": "http://127.0.0.1:39788/open", "token": "$GROVE_WEBHOOK_TOKEN", "params": { "host": "devbox", "path": "$GROVE_DIR", "name": "$GROVE_NAME" } },
     { "type": "tmux", "layout": "shell=,claude=claude" }

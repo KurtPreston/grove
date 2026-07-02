@@ -190,7 +190,7 @@ func (p *Project) WorktreePathFor(branch string) (string, bool) {
 // default branch if needed. copyFiles are untracked files copied from the
 // default-branch worktree into freshly created ones. The returned bool reports
 // whether the worktree was created on this call (vs. reused), so callers can
-// drive one-time bootstrap behavior.
+// drive one-time onCreate behavior.
 func (p *Project) EnsureWorktree(branch string, copyFiles []string) (string, bool, error) {
 	if dir, ok := p.WorktreePathFor(branch); ok {
 		ui.Info("Using existing worktree: " + dir)

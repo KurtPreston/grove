@@ -1,5 +1,6 @@
 // Package config loads grove's per-project configuration from a machine-local
-// grove.json that lives at the project root (beside the bare .base repo). It
+// grove.json (or grove.jsonc, which additionally allows comments and trailing
+// commas) that lives at the project root (beside the bare .base repo). It
 // replaces the previous spread of GROVE_* environment variables and the
 // .grove/bootstrap script: recipes and their settings are declared once, in one
 // file, and validated against grove.schema.json (shipped in the repo root).

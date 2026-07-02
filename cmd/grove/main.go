@@ -113,7 +113,7 @@ func cmdClone(args []string) {
 // cmdOpen: grove open [BRANCH] [RECIPES] [--force]. BRANCH omitted or "." infers
 // the current worktree's branch; RECIPES (a comma-separated list of recipe
 // types) filters grove.json's recipes to only those types. --force re-runs
-// one-time recipes (bootstrap) on an existing worktree.
+// create-only recipes ("onOpen": false) on an existing worktree.
 func cmdOpen(args []string) {
 	p := mustResolve()
 	args, force := popForce(args)
@@ -586,13 +586,15 @@ Usage:
   grove launch | here [DIR]      Run user-level recipes for DIR (or cwd) without a worktree
   grove help                     Show this help
 
-Pass --force to open/switch to re-run one-time recipes (bootstrap) on an existing worktree.
+Pass --force to open/switch to re-run create-only recipes ("onOpen": false) on an existing worktree.
 
-Configuration lives in grove.json at the project root (beside .base), validated by
-grove.schema.json. It declares an ordered "recipes" array; each entry has a "type"
-plus that type's settings. Built-in types: tmux, vscode-color-config, webhook,
-bootstrap. Any other type resolves to grove-recipe-<type> on PATH (settings exported
-as GROVE_RECIPE_*). The top-level "copy" array tunes which files are copied.
+Configuration lives in grove.json (or grove.jsonc, with comments/trailing commas)
+at the project root (beside .base), validated by grove.schema.json. It declares an
+ordered "recipes" array; each entry has a "type" plus that type's settings, and may
+set "onCreate"/"onOpen" (both default true) to gate when it runs. Built-in types:
+tmux, vscode-color-config, webhook, command. Any other type resolves to
+grove-recipe-<type> on PATH (settings exported as GROVE_RECIPE_*). The top-level
+"copy" array tunes which files are copied.
 Branch colors are derived automatically from a hash of the branch name.
 'grove clone' seeds a starter grove.json.
 

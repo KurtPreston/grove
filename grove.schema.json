@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://raw.githubusercontent.com/KurtPreston/grove/main/grove.schema.json",
   "title": "grove project configuration",
-  "description": "Machine-local grove.json that lives at a grove project root (beside the bare .base repo). Declares the recipes grove runs when a branch is opened, plus a few cross-recipe settings.",
+  "description": "Machine-local grove.json (or grove.jsonc) that lives at a grove project root (beside the bare .base repo). Declares the recipes grove runs when a branch is opened, plus a few cross-recipe settings. The .jsonc variant (and either extension) tolerates // and /* */ comments and trailing commas.",
   "type": "object",
   "additionalProperties": false,
   "properties": {
@@ -28,7 +28,15 @@
       "properties": {
         "type": {
           "type": "string",
-          "description": "Recipe type. Built-ins: tmux, vscode-color-config, webhook, bootstrap. Any other value resolves to grove-recipe-<type> on PATH."
+          "description": "Recipe type. Built-ins: tmux, vscode-color-config, webhook, command. Any other value resolves to grove-recipe-<type> on PATH."
+        },
+        "onCreate": {
+          "type": "boolean",
+          "description": "Run when a worktree is freshly created (default: true)."
+        },
+        "onOpen": {
+          "type": "boolean",
+          "description": "Run on every open - create, reopen, or plain-folder launch (default: true). Set false for one-time, create-only setup."
         }
       },
       "allOf": [
@@ -38,6 +46,8 @@
             "required": ["url"],
             "properties": {
               "type": { "const": "webhook" },
+              "onCreate": { "type": "boolean" },
+              "onOpen": { "type": "boolean" },
               "url": {
                 "type": "string",
                 "description": "Target URL, e.g. http://127.0.0.1:39788/open via a reverse SSH tunnel."
@@ -60,6 +70,8 @@
           "then": {
             "properties": {
               "type": { "const": "tmux" },
+              "onCreate": { "type": "boolean" },
+              "onOpen": { "type": "boolean" },
               "layout": {
                 "type": "string",
                 "description": "tmux panes as name=cmd pairs, comma-separated (e.g. shell=,claude=claude)."
@@ -69,14 +81,16 @@
           }
         },
         {
-          "if": { "properties": { "type": { "const": "bootstrap" } } },
+          "if": { "properties": { "type": { "const": "command" } } },
           "then": {
             "required": ["command"],
             "properties": {
-              "type": { "const": "bootstrap" },
+              "type": { "const": "command" },
+              "onCreate": { "type": "boolean" },
+              "onOpen": { "type": "boolean" },
               "command": {
                 "type": "string",
-                "description": "Setup command run once in a new worktree through a login shell (e.g. nvm use && yarn install)."
+                "description": "Shell command run in the worktree through a login shell (e.g. nvm use && yarn install). Pair with \"onOpen\": false for one-time setup on new worktrees only."
               },
               "shell": {
                 "type": "string",
@@ -89,7 +103,11 @@
         {
           "if": { "properties": { "type": { "const": "vscode-color-config" } } },
           "then": {
-            "properties": { "type": { "const": "vscode-color-config" } },
+            "properties": {
+              "type": { "const": "vscode-color-config" },
+              "onCreate": { "type": "boolean" },
+              "onOpen": { "type": "boolean" }
+            },
             "additionalProperties": false
           }
         }
