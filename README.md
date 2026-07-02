@@ -30,20 +30,12 @@ the interactive picker.
 curl -fsSL https://raw.githubusercontent.com/KurtPreston/grove/main/install.sh | bash
 ```
 
-This downloads the latest release for your OS/arch, installs the `grove` binary to
-`~/.local/bin`, and drops the shell-integration scripts into `~/.local/share/grove/`.
-Set `GROVE_VERSION=vX.Y.Z` to pin a version or `PREFIX=...` to change where the
-binary lands. You can also download an archive by hand from the
-[releases page](https://github.com/KurtPreston/grove/releases).
+This downloads the latest release for your OS/arch and installs the `grove`
+binary to `~/.local/bin`. Set `GROVE_VERSION=vX.Y.Z` to pin a version or
+`PREFIX=...` to change where the binary lands. You can also download an archive
+by hand from the [releases page](https://github.com/KurtPreston/grove/releases).
 
-Then add the shell integration (needed so `grove` can `cd` your shell):
-
-```sh
-# bash/zsh
-echo 'source "$HOME/.local/share/grove/grove.bash"' >> ~/.bashrc
-# fish
-echo 'source "$HOME/.local/share/grove/grove.fish"' >> ~/.config/fish/config.fish
-```
+That's the whole install — `grove` is ready to use.
 
 ### Build from source (requires Go)
 
@@ -52,18 +44,10 @@ git clone <this-repo> grove && cd grove
 make install          # builds + installs to ~/.local/bin
 ```
 
-Source the integration script from your checkout instead:
-
-```sh
-# bash/zsh
-echo 'source "/path/to/grove/shell/grove.bash"' >> ~/.bashrc
-# fish
-echo 'source "/path/to/grove/shell/grove.fish"' >> ~/.config/fish/config.fish
-```
-
-> The binary alone can't change the calling shell's directory, so the shell
-> function reads the target path grove writes to `$GROVE_CD_FILE` and performs the
-> `cd`.
+> Want `grove <branch>` to drop your shell *inside* the worktree it opens? That's
+> an opt-in extra that needs a one-line shell hook — see the
+> [`cd` recipe](#cd-move-your-shell-into-the-worktree-opt-in). Everything else
+> works without it.
 
 ## Usage
 
@@ -109,6 +93,7 @@ Built-in recipes:
 | `vscode-color-config` | — | Writes the branch color into the worktree's `.vscode/settings.json` (shared by VSCode and Cursor) and keeps it out of `git status` |
 | `webhook` | `url`, `token`, `params` | POSTs `params` as JSON to `url` (string values support `$VAR` env substitution) |
 | `command` | `command`, `shell` | Runs `command` in the worktree through a login shell. Pair with `"onOpen": false` to run it **once**, only when the worktree is first created |
+| `cd` | — | Moves the calling shell into the worktree. Opt-in; needs grove's shell integration sourced (see [below](#cd-move-your-shell-into-the-worktree-opt-in)) |
 
 ### When recipes run: `onCreate` / `onOpen`
 
@@ -155,6 +140,32 @@ in it once. Notes:
   the interpreter with the recipe's `shell` field (e.g. `"shell": "zsh"`).
 - Drop `"onOpen": false` (or set it `true`) to run the command on every open, not
   just on creation.
+
+### `cd`: move your shell into the worktree (opt-in)
+
+By default grove leaves your shell where it is. Add a `cd` recipe when you want
+`grove <branch>` to drop you inside the worktree it just opened:
+
+```json
+{ "recipes": [ { "type": "cd" } ] }
+```
+
+The catch: a binary can't change its parent shell's working directory. So the
+`cd` recipe writes the target path to `$GROVE_CD_FILE` and a tiny shell function
+does the actual `cd` once grove exits. That function ships with grove, but you
+have to source it once from your shell's startup file:
+
+```sh
+# bash/zsh
+echo 'source "$HOME/.local/share/grove/grove.bash"' >> ~/.bashrc
+# fish
+echo 'source "$HOME/.local/share/grove/grove.fish"' >> ~/.config/fish/config.fish
+```
+
+Building from source? Point `source` at `shell/grove.bash` (or `.fish`) inside
+your checkout instead. Without the sourced function the `cd` recipe warns once
+and does nothing — every other recipe still runs. Put `cd` before a `tmux`
+recipe so the destination is recorded before tmux takes over the terminal.
 
 ### `webhook`: generic HTTP POST
 
@@ -222,7 +233,9 @@ With this `grove.json` and a reverse SSH tunnel from your workstation
 ```
 
 1. You're SSH'd into your dev box. In `~/Code/myproj` you type `grove feature/x`.
-2. grove creates (or reuses) the `feature-x` worktree and `cd`s you in.
+2. grove creates (or reuses) the `feature-x` worktree (add a [`cd`
+   recipe](#cd-move-your-shell-into-the-worktree-opt-in) if you also want your
+   dev-box shell moved into it).
 3. `vscode-color-config` writes the branch color into `.vscode/settings.json`.
 4. `webhook` POSTs `{host, path, name}` (from `params`) back through the tunnel;
    wsm opens/focuses a remote Cursor window on that path.
@@ -255,8 +268,9 @@ grove launch ~/Code/slakkr   # launch a specific directory
 ```
 
 grove runs your user-level recipes against the directory, using the **folder name**
-(`slakkr`) for both the color and the webhook view name. No worktree is created
-and your shell is not moved.
+(`slakkr`) for both the color and the webhook view name. No worktree is created,
+and your shell is not moved unless you add a
+[`cd` recipe](#cd-move-your-shell-into-the-worktree-opt-in).
 
 Notes:
 
@@ -349,8 +363,10 @@ resolved, or the query fails, grove warns once and falls back to the git-only
 checks. Run `grove prune --dry-run` to preview candidates (with their reason)
 without removing anything.
 
-The only remaining environment input is `GROVE_CD_FILE`, which the shell wrapper
-sets so grove can tell it where to `cd`; it is not user configuration.
+The only environment input grove reads directly is `GROVE_CD_FILE`, which the
+shell integration sets so the opt-in
+[`cd` recipe](#cd-move-your-shell-into-the-worktree-opt-in) can tell it where to
+move your shell; it is not user configuration.
 
 A separate **user-level** config at `~/.config/grove/config.json` (honoring
 `$XDG_CONFIG_HOME`) drives `grove launch` for folders that are not grove

@@ -1,0 +1,20 @@
+{
+  // Opt-in auto-cd: move your shell into a branch's worktree when you open it.
+  //
+  // REQUIRES SHELL INTEGRATION. The grove binary can't change its parent
+  // shell's directory, so the `cd` recipe writes the target path to
+  // $GROVE_CD_FILE and grove's shell function performs the actual cd after grove
+  // exits. Source the integration once from your shell's rc file:
+  //
+  //   bash/zsh:  echo 'source "$HOME/.local/share/grove/grove.bash"' >> ~/.bashrc
+  //   fish:      echo 'source "$HOME/.local/share/grove/grove.fish"' >> ~/.config/fish/config.fish
+  //
+  // Without it the `cd` recipe warns once and is a no-op. Put `cd` before a
+  // `tmux` recipe so the target is recorded before tmux takes over the terminal.
+  "$schema": "https://raw.githubusercontent.com/KurtPreston/grove/main/grove.schema.json",
+  "copy": [".env"],
+  "recipes": [
+    { "type": "cd" },
+    { "type": "vscode-color-config" }
+  ]
+}

@@ -7,9 +7,11 @@
 //
 // (1) and (2) are core; (3) is pluggable, configured per project in grove.json.
 //
-// Shell integration: a `grove` shell function sets $GROVE_CD_FILE
-// before calling this binary. When a command should move the caller's shell, we
-// write the target directory there; the function reads it and performs the cd.
+// Shell integration is optional and drives a single opt-in recipe: a `grove`
+// shell function sets $GROVE_CD_FILE before calling this binary, and the
+// built-in `cd` recipe writes the worktree path there so the function can cd the
+// caller's shell after grove exits. Without the `cd` recipe (or the sourced
+// function) grove never moves your shell.
 package main
 
 import (
@@ -117,7 +119,6 @@ func cmdClone(args []string) {
 		ui.Info("Wrote starter " + config.SeedFilename + " (edit it to configure recipes).")
 	}
 	cfg := loadCfg(p)
-	emitCD(dir)
 	recipe.Run(cfg.Recipes, buildContext(p, branch, dir, true, false))
 }
 
@@ -180,7 +181,6 @@ func doOpen(p *project.Project, branch, filter string, force bool) {
 	if err != nil {
 		ui.Die(err.Error())
 	}
-	emitCD(dir)
 	recipe.Run(filterRecipes(cfg.Recipes, filter), buildContext(p, branch, dir, created, force))
 }
 
@@ -666,12 +666,6 @@ func fzfPick(p *project.Project) string {
 	return strings.TrimSpace(b.String())
 }
 
-func emitCD(dir string) {
-	if f := os.Getenv("GROVE_CD_FILE"); f != "" {
-		_ = os.WriteFile(f, []byte(dir), 0o644)
-	}
-}
-
 func readYes() bool {
 	var reply string
 	_, _ = fmt.Scanln(&reply)
@@ -720,9 +714,10 @@ Configuration lives in grove.json (or grove.jsonc, with comments/trailing commas
 at the project root (beside .base), validated by grove.schema.json. It declares an
 ordered "recipes" array; each entry has a "type" plus that type's settings, and may
 set "onCreate"/"onOpen" (both default true) to gate when it runs. Built-in types:
-tmux, vscode-color-config, webhook, command. Any other type resolves to
+tmux, vscode-color-config, webhook, command, cd. Any other type resolves to
 grove-recipe-<type> on PATH (settings exported as GROVE_RECIPE_*). The top-level
-"copy" array tunes which files are copied.
+"copy" array tunes which files are copied. The optional "cd" recipe moves your
+shell into the worktree and requires the shell integration to be sourced.
 Branch colors are derived automatically from a hash of the branch name.
 'grove clone' seeds a starter grove.jsonc.
 

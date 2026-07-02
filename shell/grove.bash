@@ -1,8 +1,9 @@
 # grove shell integration (bash/zsh)
 #
-# The grove binary can't change the calling shell's directory, so when a command
-# should move you (open/switch/clone/path), grove writes the target worktree path
-# to $GROVE_CD_FILE and this wrapper performs the cd.
+# Optional: this only matters if you use grove's opt-in `cd` recipe. The grove
+# binary can't change the calling shell's directory, so the `cd` recipe writes
+# the target worktree path to $GROVE_CD_FILE and this wrapper performs the cd
+# after grove exits.
 #
 # Install: source this file from ~/.bashrc or ~/.zshrc.
 

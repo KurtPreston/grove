@@ -54,7 +54,7 @@
       "properties": {
         "type": {
           "type": "string",
-          "description": "Recipe type. Built-ins: tmux, vscode-color-config, webhook, command. Any other value resolves to grove-recipe-<type> on PATH."
+          "description": "Recipe type. Built-ins: tmux, vscode-color-config, webhook, command, cd. Any other value resolves to grove-recipe-<type> on PATH."
         },
         "onCreate": {
           "type": "boolean",
@@ -131,6 +131,18 @@
           "then": {
             "properties": {
               "type": { "const": "vscode-color-config" },
+              "onCreate": { "type": "boolean" },
+              "onOpen": { "type": "boolean" }
+            },
+            "additionalProperties": false
+          }
+        },
+        {
+          "if": { "properties": { "type": { "const": "cd" } } },
+          "then": {
+            "description": "Move the calling shell into the worktree. Requires grove's shell integration (shell/grove.bash or grove.fish) to be sourced; without it grove cannot change your shell's directory.",
+            "properties": {
+              "type": { "const": "cd" },
               "onCreate": { "type": "boolean" },
               "onOpen": { "type": "boolean" }
             },

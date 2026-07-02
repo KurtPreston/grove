@@ -13,6 +13,10 @@
     // Generate a custom branch color, and write it to .vscode/settings.json for VSCode/Cursor themeing:
     { "type": "vscode-color-config" },
 
+    // Move your shell into the worktree on open. Opt-in and requires the shell
+    // integration to be sourced (see cd.jsonc); without it this is a no-op:
+    // { "type": "cd" },
+
     // Open the worktree in Cursor:
     // { "type": "command", "command": "cursor $GROVE_DIR" },
 

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Download a prebuilt grove release, install the binary, and print shell-integration
-# instructions. No Go toolchain required. Safe to pipe from curl:
+# Download a prebuilt grove release, install the binary, and print optional
+# shell-integration instructions. No Go toolchain required. Safe to pipe from curl:
 #
 #   curl -fsSL https://raw.githubusercontent.com/KurtPreston/grove/main/install.sh | bash
 #
@@ -101,10 +101,11 @@ esac
 
 cat <<EOF
 
-Add shell integration (enables 'cd into worktree' on open/switch):
+grove is installed. Run 'grove help' to get started.
+
+Optional: to let the built-in 'cd' recipe move your shell into a worktree, source
+grove's shell integration once (skip this unless you add a 'cd' recipe):
 
   bash/zsh:  echo 'source "$sharedir/grove.bash"' >> ~/.bashrc    # or ~/.zshrc
   fish:      echo 'source "$sharedir/grove.fish"' >> ~/.config/fish/config.fish
-
-Then open a new shell and run 'grove help'.
 EOF
