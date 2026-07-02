@@ -132,3 +132,89 @@ func mustWorktrees(t *testing.T, p *Project) []Worktree {
 	}
 	return wts
 }
+
+// newMergeRepo builds a plain (non-bare) repo with one commit on main and a
+// persisted git identity. BranchSquashMerged only shells out against the repo,
+// so a working repo — where commits and merges are easy to script — stands in
+// for the bare .base here. The local identity/gpgsign config matters because
+// BranchSquashMerged's own `commit-tree` call runs without grove's test flags.
+func newMergeRepo(t *testing.T) *Project {
+	t.Helper()
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+	dir := t.TempDir()
+	runGit(t, dir, "init", "-q")
+	runGit(t, dir, "config", "user.email", "grove@test")
+	runGit(t, dir, "config", "user.name", "grove")
+	runGit(t, dir, "config", "commit.gpgsign", "false")
+	return &Project{Base: dir, Dir: dir}
+}
+
+// commitFile writes name in repo and commits it. Each branch below touches a
+// distinct file so merges and cherry-picks never conflict.
+func commitFile(t *testing.T, repo, name, content, msg string) {
+	t.Helper()
+	if err := os.WriteFile(filepath.Join(repo, name), []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, repo, "add", name)
+	runGit(t, repo, "commit", "-q", "-m", msg)
+}
+
+// TestBranchSquashMerged covers the patch-equivalence detection that catches
+// history-rewriting merges `git branch --merged` misses. The interesting cases
+// are branches whose tip is NOT an ancestor of the target yet whose net diff is
+// already present there (squash and rebase merges).
+func TestBranchSquashMerged(t *testing.T) {
+	p := newMergeRepo(t)
+	base := p.Base
+	commitFile(t, base, "base.txt", "0", "c0")
+
+	// Squash-merge: the branch's change lands on main as one new commit; the
+	// branch tip is not an ancestor of main.
+	runGit(t, base, "checkout", "-q", "-b", "feat-squash")
+	commitFile(t, base, "squash.txt", "s", "s1")
+	runGit(t, base, "checkout", "-q", "main")
+	runGit(t, base, "merge", "--squash", "feat-squash")
+	runGit(t, base, "commit", "-q", "-m", "squash feat-squash")
+
+	// Rebase-merge: cherry-pick reproduces the same patch under a new hash. An
+	// unrelated commit on main first gives the replayed commit a new parent, so
+	// the branch tip is genuinely not an ancestor of main (otherwise the replay
+	// would collapse to the identical commit and look like a plain merge).
+	runGit(t, base, "checkout", "-q", "-b", "feat-rebase", "main")
+	commitFile(t, base, "rebase.txt", "r", "r1")
+	runGit(t, base, "checkout", "-q", "main")
+	commitFile(t, base, "mainx.txt", "x", "unrelated main commit")
+	runGit(t, base, "cherry-pick", "feat-rebase")
+
+	// Never merged: the branch's change is absent from main.
+	runGit(t, base, "checkout", "-q", "-b", "feat-open", "main")
+	commitFile(t, base, "open.txt", "o", "o1")
+
+	// Partially merged: two commits on the branch, only the first landed on
+	// main, so the branch's combined diff is not present upstream.
+	runGit(t, base, "checkout", "-q", "-b", "feat-partial", "main")
+	commitFile(t, base, "p1.txt", "1", "p1")
+	commitFile(t, base, "p2.txt", "2", "p2")
+	runGit(t, base, "checkout", "-q", "main")
+	runGit(t, base, "cherry-pick", "feat-partial~1")
+
+	runGit(t, base, "checkout", "-q", "main")
+
+	cases := []struct {
+		branch string
+		want   bool
+	}{
+		{"feat-squash", true},
+		{"feat-rebase", true},
+		{"feat-open", false},
+		{"feat-partial", false},
+	}
+	for _, c := range cases {
+		if got := p.BranchSquashMerged(c.branch, "main"); got != c.want {
+			t.Errorf("BranchSquashMerged(%q, main) = %v, want %v", c.branch, got, c.want)
+		}
+	}
+}
