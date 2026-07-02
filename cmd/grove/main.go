@@ -15,12 +15,14 @@
 package main
 
 import (
+	"bufio"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"grove/internal/color"
@@ -129,6 +131,7 @@ func cmdClone(args []string) {
 func cmdOpen(args []string) {
 	p := mustResolve()
 	args, force := popForce(args)
+	args, from := popFrom(args)
 	branch := ""
 	filter := ""
 	if len(args) >= 1 {
@@ -144,7 +147,7 @@ func cmdOpen(args []string) {
 		}
 		branch = b
 	}
-	doOpen(p, branch, filter, force)
+	doOpen(p, branch, filter, from, force)
 }
 
 // cmdSwitch: bare grove / grove switch / grove BRANCH. Runs grove.json's recipes.
@@ -158,6 +161,7 @@ func cmdSwitch(args []string) {
 	}
 	p := mustResolve()
 	args, force := popForce(args)
+	args, from := popFrom(args)
 	branch := ""
 	if len(args) >= 1 {
 		branch = trimSlash(args[0])
@@ -172,12 +176,12 @@ func cmdSwitch(args []string) {
 			ui.Die("usage: grove BRANCH   (install fzf for an interactive picker)")
 		}
 	}
-	doOpen(p, branch, "", force)
+	doOpen(p, branch, "", from, force)
 }
 
-func doOpen(p *project.Project, branch, filter string, force bool) {
+func doOpen(p *project.Project, branch, filter, from string, force bool) {
 	cfg := loadCfg(p)
-	dir, created, err := p.EnsureWorktree(branch, cfg.Copy)
+	dir, created, err := p.EnsureWorktree(branch, cfg.Copy, baseResolver(p, from))
 	if err != nil {
 		ui.Die(err.Error())
 	}
@@ -220,14 +224,38 @@ func popForce(args []string) ([]string, bool) {
 	return out, force
 }
 
+// popFrom removes --from REF / --from=REF from args, returning the ref ("" when
+// absent). It names the base branch for a brand-new branch, bypassing the
+// interactive base-branch picker.
+func popFrom(args []string) ([]string, string) {
+	var out []string
+	from := ""
+	for i := 0; i < len(args); i++ {
+		a := args[i]
+		switch {
+		case a == "--from":
+			if i+1 < len(args) {
+				from = args[i+1]
+				i++
+			}
+		case strings.HasPrefix(a, "--from="):
+			from = strings.TrimPrefix(a, "--from=")
+		default:
+			out = append(out, a)
+		}
+	}
+	return out, from
+}
+
 // cmdPath: resolve (creating if needed) BRANCH's worktree; print path to stdout.
 func cmdPath(args []string) {
 	p := mustResolve()
+	args, from := popFrom(args)
 	if len(args) < 1 {
 		ui.Die("usage: grove path BRANCH")
 	}
 	branch := trimSlash(args[0])
-	dir, _, err := p.EnsureWorktree(branch, loadCfg(p).Copy)
+	dir, _, err := p.EnsureWorktree(branch, loadCfg(p).Copy, baseResolver(p, from))
 	if err != nil {
 		ui.Die(err.Error())
 	}
@@ -655,8 +683,14 @@ func fzfPick(p *project.Project) string {
 			branches = append(branches, w.Branch)
 		}
 	}
-	cmd := exec.Command("fzf", "--prompt=worktree> ", "--height=40%", "--reverse")
-	cmd.Stdin = strings.NewReader(strings.Join(branches, "\n"))
+	return fzfPickFrom(branches, "worktree> ")
+}
+
+// fzfPickFrom runs fzf over items with the given prompt, returning the selection
+// (or "" when fzf is cancelled/fails).
+func fzfPickFrom(items []string, prompt string) string {
+	cmd := exec.Command("fzf", "--prompt="+prompt, "--height=40%", "--reverse")
+	cmd.Stdin = strings.NewReader(strings.Join(items, "\n"))
 	cmd.Stderr = os.Stderr
 	var b strings.Builder
 	cmd.Stdout = &b
@@ -664,6 +698,114 @@ func fzfPick(p *project.Project) string {
 		return ""
 	}
 	return strings.TrimSpace(b.String())
+}
+
+// baseResolver builds the pickBase callback handed to EnsureWorktree. It only
+// runs when a brand-new branch is being created (existing branches are reused
+// without consulting it). Resolution order:
+//   - an explicit --from REF wins;
+//   - on the default branch, when the current branch can't be determined, or
+//     when stdin is not a TTY, keep the historical behavior and base off the
+//     default branch;
+//   - otherwise prompt for any base branch.
+func baseResolver(p *project.Project, from string) func(def string) (string, error) {
+	return func(def string) (string, error) {
+		if from != "" {
+			return from, nil
+		}
+		cur, ok := currentBranch(mustGetwd())
+		if !ok || cur == def {
+			return def, nil
+		}
+		if !isInteractive() {
+			ui.Info(fmt.Sprintf("Basing new branch off default '%s' (non-interactive; pass --from to choose).", def))
+			return def, nil
+		}
+		return pickBaseBranch(p, def, cur)
+	}
+}
+
+// pickBaseBranch asks which branch to base a new branch off, offering every
+// branch in the project with the default and current branches surfaced first.
+// It uses fzf when available; otherwise it prints a numbered menu that also
+// accepts a typed branch name.
+func pickBaseBranch(p *project.Project, def, cur string) (string, error) {
+	order := orderedBases(p, def, cur)
+	if hasBin("fzf") {
+		choice := fzfPickFrom(order, fmt.Sprintf("base for new branch off (default %s)> ", def))
+		if choice == "" {
+			return "", fmt.Errorf("no base branch selected")
+		}
+		return choice, nil
+	}
+	return numberedBasePrompt(order, def, cur), nil
+}
+
+// orderedBases returns the base-branch candidates with def first and cur second
+// (when distinct), followed by the project's remaining branches.
+func orderedBases(p *project.Project, def, cur string) []string {
+	seen := map[string]bool{}
+	var order []string
+	push := func(b string) {
+		if b == "" || seen[b] {
+			return
+		}
+		seen[b] = true
+		order = append(order, b)
+	}
+	push(def)
+	push(cur)
+	for _, b := range p.BranchList() {
+		push(b)
+	}
+	return order
+}
+
+// numberedBasePrompt renders a numbered menu of base branches on stderr and
+// reads the choice from stdin. A number selects that entry; a non-empty
+// non-numeric line is treated as a typed branch name; a bare Enter selects the
+// default branch. This is the fallback when fzf is not installed.
+func numberedBasePrompt(order []string, def, cur string) string {
+	fmt.Fprintln(os.Stderr, "Base the new branch off which branch?")
+	for i, b := range order {
+		tag := ""
+		switch b {
+		case def:
+			tag = ui.Dim + " (default)" + ui.Reset
+		case cur:
+			tag = ui.Dim + " (current)" + ui.Reset
+		}
+		fmt.Fprintf(os.Stderr, "  %s[%d]%s %s%s\n", ui.Bold, i+1, ui.Reset, b, tag)
+	}
+	fmt.Fprintf(os.Stderr, "Enter a number or branch name [%s]: ", def)
+	line := strings.TrimSpace(readLine())
+	if line == "" {
+		return def
+	}
+	if n, err := strconv.Atoi(line); err == nil {
+		if n >= 1 && n <= len(order) {
+			return order[n-1]
+		}
+		return def
+	}
+	return line
+}
+
+// isInteractive reports whether stdin is a terminal, so grove only prompts when
+// a human can answer. Scripts, pipes, and non-TTY SSH commands fall through to
+// non-interactive defaults instead of blocking on a prompt.
+func isInteractive() bool {
+	fi, err := os.Stdin.Stat()
+	if err != nil {
+		return false
+	}
+	return fi.Mode()&os.ModeCharDevice != 0
+}
+
+// readLine reads a single line from stdin (without the trailing newline).
+func readLine() string {
+	line, _ := bufio.NewReader(os.Stdin).ReadString('\n')
+	return strings.TrimRight(line, "\r\n")
 }
 
 func readYes() bool {
@@ -691,7 +833,7 @@ func usage() {
 
 Usage:
   grove clone GIT_URL [FOLDER]   Clone a repo (under FOLDER in the current dir) as a bare .base + default worktree
-  grove BRANCH                   Switch to (or create) BRANCH's worktree; run grove.json recipes
+  grove BRANCH [--from REF]      Switch to (or create) BRANCH's worktree; run grove.json recipes
   grove open [BRANCH] [TYPES]    Open BRANCH (or current); TYPES filters grove.json recipes by type
   grove switch [BRANCH]          Like a bare BRANCH; no BRANCH opens an fzf picker
   grove path BRANCH              Resolve (creating if needed) BRANCH's worktree; print its path
@@ -705,6 +847,11 @@ Usage:
   grove help                     Show this help
 
 Pass --force to open/switch to re-run create-only recipes ("onOpen": false) on an existing worktree.
+
+When a branch doesn't exist yet, grove creates it. If you're on a non-default branch and
+stdin is a TTY, grove asks which branch to base the new branch off (fzf when available,
+else a numbered menu). Pass --from REF to choose the base non-interactively (also used by
+scripts and non-TTY sessions); otherwise the new branch is based off the default branch.
 
 Worktree folders deleted outside grove (e.g. 'rm -rf') are reconciled automatically
 on the next command: grove drops git's stale bookkeeping so the worktree stops

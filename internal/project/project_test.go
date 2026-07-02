@@ -251,7 +251,7 @@ func TestEnsureWorktreeSetsUpstream(t *testing.T) {
 	p := newTestProject(t)
 
 	// Path: brand-new branch off the default.
-	if _, _, err := p.EnsureWorktree("feature/new", nil); err != nil {
+	if _, _, err := p.EnsureWorktree("feature/new", nil, baseDefault); err != nil {
 		t.Fatalf("EnsureWorktree(feature/new): %v", err)
 	}
 	assertTracksOrigin(t, p.Base, "feature/new")
@@ -259,11 +259,15 @@ func TestEnsureWorktreeSetsUpstream(t *testing.T) {
 	// Path: a local branch that already exists in the bare repo with no tracking
 	// config (e.g. carried over from a full clone).
 	runGit(t, p.Base, "branch", "local/only", "main")
-	if _, _, err := p.EnsureWorktree("local/only", nil); err != nil {
+	if _, _, err := p.EnsureWorktree("local/only", nil, baseDefault); err != nil {
 		t.Fatalf("EnsureWorktree(local/only): %v", err)
 	}
 	assertTracksOrigin(t, p.Base, "local/only")
 }
+
+// baseDefault is a pickBase resolver that always keeps grove's historical
+// behavior of basing a new branch off the project default branch.
+func baseDefault(def string) (string, error) { return def, nil }
 
 // TestEnsureWorktreeKeepsExistingUpstream verifies grove never clobbers an
 // upstream a branch was already deliberately configured to track.
@@ -273,7 +277,7 @@ func TestEnsureWorktreeKeepsExistingUpstream(t *testing.T) {
 	runGit(t, p.Base, "config", "branch.tracked.remote", "upstream")
 	runGit(t, p.Base, "config", "branch.tracked.merge", "refs/heads/somewhere")
 
-	if _, _, err := p.EnsureWorktree("tracked", nil); err != nil {
+	if _, _, err := p.EnsureWorktree("tracked", nil, baseDefault); err != nil {
 		t.Fatalf("EnsureWorktree(tracked): %v", err)
 	}
 	if got := gitConfig(t, p.Base, "branch.tracked.remote"); got != "upstream" {
@@ -281,6 +285,50 @@ func TestEnsureWorktreeKeepsExistingUpstream(t *testing.T) {
 	}
 	if got := gitConfig(t, p.Base, "branch.tracked.merge"); got != "refs/heads/somewhere" {
 		t.Errorf("branch.tracked.merge = %q, want refs/heads/somewhere (pre-existing, not clobbered)", got)
+	}
+}
+
+// revParse resolves a rev in dir to its full object id, failing the test on error.
+func revParse(t *testing.T, dir, rev string) string {
+	t.Helper()
+	out, err := GitOut(dir, "rev-parse", rev)
+	if err != nil {
+		t.Fatalf("rev-parse %s: %v", rev, err)
+	}
+	return strings.TrimSpace(out)
+}
+
+// TestEnsureWorktreeBasesOffChosenBranch verifies a brand-new branch is created
+// off the branch the pickBase resolver returns, not the project default. branch1
+// is advanced past main first so "based off branch1" is observable, and the new
+// branch must still track origin/<branch> so it stays pushable.
+func TestEnsureWorktreeBasesOffChosenBranch(t *testing.T) {
+	p := newTestProject(t, "branch1")
+
+	// Advance branch1 beyond main via its worktree so the two tips differ.
+	commitFile(t, filepath.Join(p.Dir, "branch1"), "b1.txt", "b1", "branch1 commit")
+
+	base := func(def string) (string, error) { return "branch1", nil }
+	if _, _, err := p.EnsureWorktree("feature/off-branch1", nil, base); err != nil {
+		t.Fatalf("EnsureWorktree(feature/off-branch1): %v", err)
+	}
+
+	newTip := revParse(t, p.Base, "feature/off-branch1")
+	if want := revParse(t, p.Base, "branch1"); newTip != want {
+		t.Errorf("new branch tip = %s, want branch1 tip %s", newTip, want)
+	}
+	if mainTip := revParse(t, p.Base, "main"); newTip == mainTip {
+		t.Errorf("new branch tip should differ from main (%s); it looks based off main, not branch1", mainTip)
+	}
+	assertTracksOrigin(t, p.Base, "feature/off-branch1")
+}
+
+// TestResolveBaseRefUnknownBranchErrors ensures a bad base branch (e.g. a typo
+// passed via --from) fails loudly instead of silently basing off HEAD.
+func TestResolveBaseRefUnknownBranchErrors(t *testing.T) {
+	p := newTestProject(t)
+	if _, err := p.resolveBaseRef("does-not-exist"); err == nil {
+		t.Errorf("resolveBaseRef(does-not-exist) = nil error, want an error")
 	}
 }
 

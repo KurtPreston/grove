@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"grove/internal/ui"
@@ -243,12 +244,18 @@ func setUpstream(base, branch string) {
 	_ = Git(base, "config", "branch."+branch+".merge", "refs/heads/"+branch)
 }
 
-// EnsureWorktree returns the worktree dir for branch, creating it off the latest
-// default branch if needed. copyFiles are untracked files copied from the
-// default-branch worktree into freshly created ones. The returned bool reports
-// whether the worktree was created on this call (vs. reused), so callers can
-// drive one-time onCreate behavior.
-func (p *Project) EnsureWorktree(branch string, copyFiles []string) (string, bool, error) {
+// EnsureWorktree returns the worktree dir for branch, creating it if needed.
+// copyFiles are untracked files copied from the default-branch worktree into
+// freshly created ones. The returned bool reports whether the worktree was
+// created on this call (vs. reused), so callers can drive one-time onCreate
+// behavior.
+//
+// pickBase chooses which branch a brand-new branch is based off. It is called
+// only when the branch exists neither locally nor on origin — reusing an
+// existing branch never consults it. It receives the project default branch and
+// returns the branch name to base off (return def to keep the historical
+// "off the default branch" behavior). A nil pickBase defaults to def.
+func (p *Project) EnsureWorktree(branch string, copyFiles []string, pickBase func(def string) (string, error)) (string, bool, error) {
 	if dir, ok := p.WorktreePathFor(branch); ok {
 		ui.Info("Using existing worktree: " + dir)
 		if GitQuiet(dir, "pull", "--ff-only") {
@@ -283,9 +290,19 @@ func (p *Project) EnsureWorktree(branch string, copyFiles []string) (string, boo
 			return "", false, fmt.Errorf("worktree add failed")
 		}
 	default:
-		baseRef := def
-		if GitQuiet(p.Base, "show-ref", "--verify", "--quiet", "refs/remotes/origin/"+def) {
-			baseRef = "origin/" + def
+		baseBranch := def
+		if pickBase != nil {
+			chosen, err := pickBase(def)
+			if err != nil {
+				return "", false, err
+			}
+			if chosen != "" {
+				baseBranch = chosen
+			}
+		}
+		baseRef, err := p.resolveBaseRef(baseBranch)
+		if err != nil {
+			return "", false, err
 		}
 		ui.Info(fmt.Sprintf("Creating new branch '%s' off %s at %s", branch, baseRef, dir))
 		// --no-track so autoSetupMerge doesn't point upstream at the base ref; we
@@ -298,6 +315,50 @@ func (p *Project) EnsureWorktree(branch string, copyFiles []string) (string, boo
 
 	p.setupWorktree(dir, copyFiles)
 	return dir, true, nil
+}
+
+// resolveBaseRef turns a base-branch name into a concrete ref to branch from.
+// It prefers origin/<branch> when that remote-tracking ref exists so new
+// branches start from the latest fetched upstream (matching grove's historical
+// behavior for the default branch), falling back to the local branch when there
+// is no remote counterpart. An unknown name is an error so a bad --from (or an
+// empty picker selection) fails loudly instead of silently basing off HEAD.
+func (p *Project) resolveBaseRef(branch string) (string, error) {
+	if GitQuiet(p.Base, "show-ref", "--verify", "--quiet", "refs/remotes/origin/"+branch) {
+		return "origin/" + branch, nil
+	}
+	if GitQuiet(p.Base, "rev-parse", "--verify", "--quiet", branch+"^{commit}") {
+		return branch, nil
+	}
+	return "", fmt.Errorf("base branch %q not found locally or on origin", branch)
+}
+
+// BranchList returns the branch names available to base a new branch off:
+// local heads plus origin remote branches, with the origin/ prefix stripped,
+// deduped and sorted. origin/HEAD is skipped (it is a symbolic alias, not a
+// branch). Used to populate the interactive base-branch picker.
+func (p *Project) BranchList() []string {
+	seen := map[string]bool{}
+	var out []string
+	add := func(name string) {
+		if name == "" || name == "HEAD" || seen[name] {
+			return
+		}
+		seen[name] = true
+		out = append(out, name)
+	}
+	if o, err := GitOut(p.Base, "for-each-ref", "--format=%(refname:short)", "refs/heads"); err == nil {
+		for _, line := range strings.Split(o, "\n") {
+			add(strings.TrimSpace(line))
+		}
+	}
+	if o, err := GitOut(p.Base, "for-each-ref", "--format=%(refname:short)", "refs/remotes/origin"); err == nil {
+		for _, line := range strings.Split(o, "\n") {
+			add(strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(line), "origin/")))
+		}
+	}
+	sort.Strings(out)
+	return out
 }
 
 // Clone creates a new project: a bare .base plus a worktree for the default
