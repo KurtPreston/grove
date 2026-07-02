@@ -51,6 +51,13 @@ type Config struct {
 type RecipeConfig struct {
 	Type string `json:"type"`
 
+	// Lifecycle gate shared by every recipe. Both default to true when unset
+	// (nil): OnCreate lets a recipe run when a worktree is freshly created,
+	// OnOpen lets it run on every open (create, reopen, and plain-folder
+	// launch). Set OnOpen to false for one-time, create-only setup.
+	OnCreate *bool `json:"onCreate,omitempty"`
+	OnOpen   *bool `json:"onOpen,omitempty"`
+
 	// webhook
 	URL    string         `json:"url,omitempty"`
 	Token  string         `json:"token,omitempty"`
@@ -59,7 +66,7 @@ type RecipeConfig struct {
 	// tmux
 	Layout string `json:"layout,omitempty"`
 
-	// bootstrap
+	// command
 	Command string `json:"command,omitempty"`
 	Shell   string `json:"shell,omitempty"`
 }
@@ -160,9 +167,9 @@ func (c Config) validate() {
 			if r.URL == "" {
 				ui.Warn("grove.json: webhook recipe is missing \"url\"; it will be skipped.")
 			}
-		case "bootstrap":
+		case "command":
 			if r.Command == "" {
-				ui.Warn("grove.json: bootstrap recipe is missing \"command\"; it will be skipped.")
+				ui.Warn("grove.json: command recipe is missing \"command\"; it will be skipped.")
 			}
 		}
 	}

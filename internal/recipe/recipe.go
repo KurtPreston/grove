@@ -35,12 +35,12 @@ type Context struct {
 	InSSH         bool
 
 	// Created reports whether the worktree was created on this invocation (vs.
-	// an existing one being reopened). Recipes like bootstrap use it to run
-	// one-time setup only on fresh worktrees.
+	// an existing one being reopened). The lifecycle gate (see shouldRun) uses
+	// it so onCreate-only recipes run only on fresh worktrees.
 	Created bool
 
-	// Force requests that one-time recipes (bootstrap) run even when the
-	// worktree already existed. Set by `grove open --force`.
+	// Force requests that create-only recipes run even when the worktree
+	// already existed. Set by `grove open --force`.
 	Force bool
 }
 
@@ -92,6 +92,10 @@ func Run(recipes []config.RecipeConfig, ctx Context) {
 		if name == "" {
 			continue
 		}
+		if !shouldRun(rc, ctx) {
+			ui.Info("recipe: " + name + " (skipped: does not run on this open; use --force or set onOpen)")
+			continue
+		}
 		if r, ok := registry[name]; ok {
 			ui.Info("recipe: " + name)
 			if err := r(ctx, rc); err != nil {
@@ -115,6 +119,20 @@ func Run(recipes []config.RecipeConfig, ctx Context) {
 		ui.Warn("unknown recipe: " + name + " (no built-in and no grove-recipe-" + name + " on PATH)")
 	}
 }
+
+// shouldRun applies the shared lifecycle gate to a recipe entry. Both flags
+// default to true (nil). A fresh create (or --force) is also the first open, so
+// on a create event a recipe runs if either onCreate or onOpen is set; on a
+// reopen (or plain-folder launch) it runs only if onOpen is set.
+func shouldRun(rc config.RecipeConfig, ctx Context) bool {
+	if ctx.Created || ctx.Force {
+		return runsOnCreate(rc) || runsOnOpen(rc)
+	}
+	return runsOnOpen(rc)
+}
+
+func runsOnCreate(rc config.RecipeConfig) bool { return rc.OnCreate == nil || *rc.OnCreate }
+func runsOnOpen(rc config.RecipeConfig) bool   { return rc.OnOpen == nil || *rc.OnOpen }
 
 // recipeEnv exports a recipe's configuration entry as GROVE_RECIPE_* variables
 // so external recipes can read the same settings the built-ins receive. String
