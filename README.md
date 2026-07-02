@@ -81,7 +81,7 @@ Built-in recipes:
 |--------|----------|--------------|
 | `tmux` | `layout` | Ensures a per-project tmux session with one window per worktree (colored), one pane per `layout` entry, then attaches/switches |
 | `vscode-color-config` | — | Writes the branch color into the worktree's `.vscode/settings.json` (shared by VSCode and Cursor) and keeps it out of `git status` |
-| `webhook` | `url`, `token`, `sshHost` | POSTs `{host, path, name}` as JSON to `url` |
+| `webhook` | `url`, `token`, `params` | POSTs `params` as JSON to `url` (string values support `$VAR` env substitution) |
 | `bootstrap` | `command`, `shell` | Runs `command` (e.g. `nvm use && yarn install && yarn build`) **once**, the first time a worktree is created |
 
 ### `bootstrap`: per-project setup on new worktrees
@@ -111,22 +111,38 @@ in it once. Notes:
 - To re-run bootstrap on a worktree that already exists, pass `--force` to
   `grove open`/`switch`.
 
-### `webhook`: open the worktree on another machine
+### `webhook`: generic HTTP POST
 
-The webhook payload is a loose contract `{host, path, name}` consumed by a
-companion workstation listener (e.g. [wsm](https://github.com/KurtPreston/wsm)),
-which opens/focuses a remote editor at `host:path`.
+The webhook recipe POSTs an arbitrary JSON `params` object to `url`. String
+values in `params` (and in `url` / `token`) are expanded with `$VAR` / `${VAR}`
+from the grove context environment before the request is sent.
 
-For the remote (SSH) flow, point the recipe's `url` at the reverse-tunnel
-endpoint — e.g. `http://127.0.0.1:39788/open` — which a reverse SSH tunnel
-(`RemoteForward 39788 127.0.0.1:39788`) forwards to wsm on the machine you
-SSH'd in from. Set `sshHost` so wsm knows which host to open. If `token` is
-set, the recipe adds an `Authorization: Bearer <token>` header so the listener
-can require a shared secret (wsm requires a token in all modes).
+For the remote (SSH) flow, point `url` at the reverse-tunnel endpoint — e.g.
+`http://127.0.0.1:39788/open` — which a reverse SSH tunnel
+(`RemoteForward 39788 127.0.0.1:39788`) forwards to
+[wsm](https://github.com/KurtPreston/wsm) on the machine you SSH'd in from.
+When `token` is set, the recipe adds an `Authorization: Bearer <token>` header
+(wsm requires a token in all modes).
 
 ```json
-{ "type": "webhook", "url": "http://127.0.0.1:39788/open", "token": "secret", "sshHost": "devbox" }
+{
+  "type": "webhook",
+  "url": "http://127.0.0.1:39788/open",
+  "token": "$GROVE_WEBHOOK_TOKEN",
+  "params": {
+    "host": "devbox",
+    "path": "$GROVE_DIR",
+    "name": "$GROVE_NAME"
+  }
+}
 ```
+
+`GROVE_NAME` is the sanitized branch name (same as grove uses for worktree
+directory names). `GROVE_DIR` is the absolute worktree path.
+
+Company-specific companion URLs (JIRA tickets, GitHub PRs, etc.) belong in an
+[external recipe](#writing-your-own-recipe) — see
+[`docs/grove-recipe-company-links.example.sh`](docs/grove-recipe-company-links.example.sh).
 
 ### Writing your own recipe
 
@@ -136,6 +152,7 @@ your `PATH`. grove invokes it with the following environment:
 | Variable | Meaning |
 |----------|---------|
 | `GROVE_BRANCH` | the branch being opened |
+| `GROVE_NAME` | sanitized branch name (`/` and `:` → `-`) |
 | `GROVE_DIR` | absolute worktree path |
 | `GROVE_COLOR` / `GROVE_FG` | branch color and a readable foreground |
 | `GROVE_PROJECT` / `GROVE_PROJECT_DIR` | project name and its directory |
@@ -143,7 +160,7 @@ your `PATH`. grove invokes it with the following environment:
 | `GROVE_DEFAULT_BRANCH` | the repo's default branch |
 | `GROVE_IN_SSH` | `1` when running inside an SSH session |
 | `GROVE_CREATED` | `1` when the worktree was created on this invocation (vs. reopened) |
-| `GROVE_RECIPE_*` | the recipe entry's own fields (`GROVE_RECIPE_URL`, `GROVE_RECIPE_TOKEN`, `GROVE_RECIPE_SSH_HOST`, `GROVE_RECIPE_LAYOUT`, `GROVE_RECIPE_COMMAND`, `GROVE_RECIPE_SHELL`) |
+| `GROVE_RECIPE_*` | the recipe entry's own fields (`GROVE_RECIPE_URL`, `GROVE_RECIPE_TOKEN`, `GROVE_RECIPE_LAYOUT`, `GROVE_RECIPE_COMMAND`, `GROVE_RECIPE_SHELL`, plus string `params` keys) |
 
 ## Example: remote workflow
 
@@ -154,7 +171,7 @@ With this `grove.json` and a reverse SSH tunnel from your workstation
 {
   "recipes": [
     { "type": "vscode-color-config" },
-    { "type": "webhook", "url": "http://127.0.0.1:39788/open", "sshHost": "devbox" }
+    { "type": "webhook", "url": "http://127.0.0.1:39788/open", "token": "$GROVE_WEBHOOK_TOKEN", "params": { "host": "devbox", "path": "$GROVE_DIR", "name": "$GROVE_NAME" } }
   ]
 }
 ```
@@ -162,8 +179,8 @@ With this `grove.json` and a reverse SSH tunnel from your workstation
 1. You're SSH'd into your dev box. In `~/Code/myproj` you type `grove feature/x`.
 2. grove creates (or reuses) the `feature-x` worktree and `cd`s you in.
 3. `vscode-color-config` writes the branch color into `.vscode/settings.json`.
-4. `webhook` POSTs `{host, path, name}` back through the tunnel; your
-   workstation listener opens/focuses a remote Cursor window on that path.
+4. `webhook` POSTs `{host, path, name}` (from `params`) back through the tunnel;
+   wsm opens/focuses a remote Cursor window on that path.
 
 ## Launching any folder
 
@@ -178,7 +195,7 @@ Put a **user-level** config at `$XDG_CONFIG_HOME/grove/config.json` (default
 {
   "recipes": [
     { "type": "vscode-color-config" },
-    { "type": "webhook", "url": "http://127.0.0.1:39788/open", "token": "secret", "sshHost": "devbox" }
+    { "type": "webhook", "url": "http://127.0.0.1:39788/open", "token": "$GROVE_WEBHOOK_TOKEN", "params": { "host": "devbox", "path": "$GROVE_DIR", "name": "$GROVE_NAME" } }
   ]
 }
 ```
@@ -200,8 +217,8 @@ Notes:
 
 - **No default recipe is assumed.** With no user config present, the launch is a
   hard error pointing you at the config path — grove never invents behavior.
-- The webhook still sends `{host, path, name}` to wsm exactly as the worktree
-  flow does, so the dedicated virtual-desktop view is handled on the workstation.
+- The webhook sends whatever you put in `params` (with env substitution) to
+  wsm, so the dedicated virtual-desktop view is handled on the workstation.
 - Theming a *remote* Cursor window relies on writing the folder's
   `.vscode/settings.json` (added to `.git/info/exclude` locally, just like the
   worktree flow). Drop `vscode-color-config` from the user config if you don't
@@ -235,7 +252,7 @@ autocomplete and inline validation.
   "recipes": [
     { "type": "bootstrap", "command": "nvm use && yarn install && yarn build" },
     { "type": "vscode-color-config" },
-    { "type": "webhook", "url": "http://127.0.0.1:39788/open", "token": "secret", "sshHost": "devbox" },
+    { "type": "webhook", "url": "http://127.0.0.1:39788/open", "token": "$GROVE_WEBHOOK_TOKEN", "params": { "host": "devbox", "path": "$GROVE_DIR", "name": "$GROVE_NAME" } },
     { "type": "tmux", "layout": "shell=,claude=claude" }
   ]
 }

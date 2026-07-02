@@ -52,9 +52,9 @@ type RecipeConfig struct {
 	Type string `json:"type"`
 
 	// webhook
-	URL     string `json:"url,omitempty"`
-	Token   string `json:"token,omitempty"`
-	SSHHost string `json:"sshHost,omitempty"`
+	URL    string         `json:"url,omitempty"`
+	Token  string         `json:"token,omitempty"`
+	Params map[string]any `json:"params,omitempty"`
 
 	// tmux
 	Layout string `json:"layout,omitempty"`

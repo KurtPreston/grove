@@ -44,11 +44,12 @@
               },
               "token": {
                 "type": "string",
-                "description": "Shared secret sent as 'Authorization: Bearer <token>'."
+                "description": "Shared secret sent as 'Authorization: Bearer <token>'. Supports $VAR env substitution."
               },
-              "sshHost": {
-                "type": "string",
-                "description": "Remote-SSH host alias embedded in the webhook payload."
+              "params": {
+                "type": "object",
+                "description": "JSON body to POST. String values support $VAR / ${VAR} substitution from grove context env.",
+                "additionalProperties": true
               }
             },
             "additionalProperties": false

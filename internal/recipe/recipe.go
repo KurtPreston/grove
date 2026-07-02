@@ -13,8 +13,10 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"strings"
 
 	"grove/internal/config"
+	"grove/internal/project"
 	"grove/internal/ui"
 )
 
@@ -56,6 +58,7 @@ func (c Context) Env() []string {
 	}
 	for _, kv := range [][2]string{
 		{"GROVE_BRANCH", c.Branch},
+		{"GROVE_NAME", project.Sanitize(c.Branch)},
 		{"GROVE_DIR", c.Dir},
 		{"GROVE_COLOR", c.Color},
 		{"GROVE_FG", c.Fg},
@@ -100,7 +103,7 @@ func Run(recipes []config.RecipeConfig, ctx Context) {
 		if path, err := exec.LookPath(bin); err == nil {
 			ui.Info("recipe: " + name + " (external)")
 			cmd := exec.Command(path)
-			cmd.Env = append(ctx.Env(), recipeEnv(rc)...)
+			cmd.Env = append(ctx.Env(), recipeEnv(ctx, rc)...)
 			cmd.Stdin = os.Stdin
 			cmd.Stdout = os.Stderr
 			cmd.Stderr = os.Stderr
@@ -114,20 +117,27 @@ func Run(recipes []config.RecipeConfig, ctx Context) {
 }
 
 // recipeEnv exports a recipe's configuration entry as GROVE_RECIPE_* variables
-// so external recipes can read the same settings the built-ins receive.
-func recipeEnv(rc config.RecipeConfig) []string {
-	var e []string
+// so external recipes can read the same settings the built-ins receive. String
+// values are env-substituted from ctx before export.
+func recipeEnv(ctx Context, rc config.RecipeConfig) []string {
+	env := ctx.Env()
+	var out []string
 	add := func(k, v string) {
+		v = ExpandString(v, env)
 		if v != "" {
-			e = append(e, "GROVE_RECIPE_"+k+"="+v)
+			out = append(out, "GROVE_RECIPE_"+k+"="+v)
 		}
 	}
 	add("TYPE", rc.Type)
 	add("URL", rc.URL)
 	add("TOKEN", rc.Token)
-	add("SSH_HOST", rc.SSHHost)
 	add("LAYOUT", rc.Layout)
 	add("COMMAND", rc.Command)
 	add("SHELL", rc.Shell)
-	return e
+	for k, v := range rc.Params {
+		if s, ok := v.(string); ok {
+			add(strings.ToUpper(k), s)
+		}
+	}
+	return out
 }
