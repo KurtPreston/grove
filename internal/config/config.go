@@ -80,19 +80,23 @@ func Defaults() Config {
 	}
 }
 
-// Load reads <projectDir>/grove.json. A missing file yields Defaults() with no
-// error. An unreadable or invalid file is non-fatal: it returns Defaults() and
-// the error so the caller can warn. On success the parsed config is validated
-// (emitting warnings for obviously-misconfigured recipes) and returned, with
-// omitted top-level keys falling back to their defaults.
+// Load reads the project config, preferring <projectDir>/grove.jsonc over
+// grove.json (both accept comments and trailing commas). A missing file yields
+// Defaults() with no error. An unreadable or invalid file is non-fatal: it
+// returns Defaults() and the error so the caller can warn. On success the
+// parsed config is validated (emitting warnings for obviously-misconfigured
+// recipes) and returned, with omitted top-level keys falling back to their
+// defaults.
 func Load(projectDir string) (Config, error) {
-	path := filepath.Join(projectDir, Filename)
-	b, err := os.ReadFile(path)
+	b, found, err := readConfig([]string{
+		filepath.Join(projectDir, "grove.jsonc"),
+		filepath.Join(projectDir, Filename),
+	})
 	if err != nil {
-		if errors.Is(err, fs.ErrNotExist) {
-			return Defaults(), nil
-		}
 		return Defaults(), err
+	}
+	if !found {
+		return Defaults(), nil
 	}
 
 	// Start from defaults so an omitted "copy"/"recipes" key keeps the
@@ -105,10 +109,26 @@ func Load(projectDir string) (Config, error) {
 	return cfg, nil
 }
 
-// UserConfigPath returns the path to grove's user-level config, used by the
-// launch flow when cwd is not inside a grove project. It honors
-// $XDG_CONFIG_HOME, falling back to ~/.config/grove/config.json.
-func UserConfigPath() (string, error) {
+// readConfig reads the first existing file among paths and returns its
+// JSONC-stripped bytes. found is false when none of the paths exist; an
+// existing-but-unreadable file is reported via err (found=true).
+func readConfig(paths []string) (b []byte, found bool, err error) {
+	for _, p := range paths {
+		raw, rerr := os.ReadFile(p)
+		if rerr != nil {
+			if errors.Is(rerr, fs.ErrNotExist) {
+				continue
+			}
+			return nil, true, rerr
+		}
+		return stripJSONC(raw), true, nil
+	}
+	return nil, false, nil
+}
+
+// userConfigDir returns grove's user-level config directory, honoring
+// $XDG_CONFIG_HOME and falling back to ~/.config/grove.
+func userConfigDir() (string, error) {
 	dir := os.Getenv("XDG_CONFIG_HOME")
 	if dir == "" {
 		home, err := os.UserHomeDir()
@@ -117,24 +137,39 @@ func UserConfigPath() (string, error) {
 		}
 		dir = filepath.Join(home, ".config")
 	}
-	return filepath.Join(dir, "grove", "config.json"), nil
+	return filepath.Join(dir, "grove"), nil
 }
 
-// LoadUser reads the user-level config (see UserConfigPath). Unlike Load, it
-// does NOT fall back to Defaults(): outside a grove project there is no sensible
-// implicit recipe, so a missing file yields found=false and the caller decides
-// what to do. An unreadable or invalid file is reported via err (found=true).
+// UserConfigPath returns the canonical path to grove's user-level config, used
+// by the launch flow when cwd is not inside a grove project (and in the
+// "not configured" error message). LoadUser also accepts a config.jsonc sibling.
+func UserConfigPath() (string, error) {
+	dir, err := userConfigDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(dir, "config.json"), nil
+}
+
+// LoadUser reads the user-level config, preferring config.jsonc over
+// config.json (see UserConfigPath). Unlike Load, it does NOT fall back to
+// Defaults(): outside a grove project there is no sensible implicit recipe, so
+// a missing file yields found=false and the caller decides what to do. An
+// unreadable or invalid file is reported via err (found=true).
 func LoadUser() (cfg Config, found bool, err error) {
-	path, err := UserConfigPath()
+	dir, err := userConfigDir()
 	if err != nil {
 		return Config{}, false, err
 	}
-	b, err := os.ReadFile(path)
+	b, found, err := readConfig([]string{
+		filepath.Join(dir, "config.jsonc"),
+		filepath.Join(dir, "config.json"),
+	})
 	if err != nil {
-		if errors.Is(err, fs.ErrNotExist) {
-			return Config{}, false, nil
-		}
-		return Config{}, false, err
+		return Config{}, true, err
+	}
+	if !found {
+		return Config{}, false, nil
 	}
 	if err := json.Unmarshal(b, &cfg); err != nil {
 		return Config{}, true, err
