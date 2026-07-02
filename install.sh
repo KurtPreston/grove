@@ -43,12 +43,13 @@ case "$arch" in
   *) die "unsupported architecture: $arch (grove ships amd64 and arm64 builds)" ;;
 esac
 
-# Resolve the release tag to install.
+# Resolve the release tag to install. Capture the response before parsing so the
+# curl pipe is never closed early (which would trip SIGPIPE under pipefail).
 tag="${GROVE_VERSION:-}"
 if [ -z "$tag" ]; then
-  tag="$(fetch "https://api.github.com/repos/$repo/releases/latest" \
-    | grep -m1 '"tag_name"' \
-    | sed -E 's/.*"tag_name": *"([^"]+)".*/\1/')"
+  resp="$(fetch "https://api.github.com/repos/$repo/releases/latest")" \
+    || die "could not query the latest release of $repo (set GROVE_VERSION to pin one)"
+  tag="$(printf '%s\n' "$resp" | grep '"tag_name"' | head -n1 | sed -E 's/.*"tag_name": *"([^"]+)".*/\1/')"
   [ -n "$tag" ] || die "could not determine the latest release of $repo (set GROVE_VERSION to pin one)"
 fi
 
