@@ -235,13 +235,33 @@ func (p *Project) ReconcileStale() []string {
 // remote-tracking ref (e.g. `worktree add --track`); grove sets it explicitly for
 // its other creation paths — brand-new branches, pre-existing local branches, and
 // the default branch materialized by clone — so every grove branch is pushable out
-// of the box. It never clobbers an upstream the branch already has.
+// of the box.
+//
+// grove's model is that a branch tracks its own same-named branch on origin, so
+// it also repairs a stale upstream that points at a *different* branch on origin —
+// typically the ref the branch was forked from (e.g. origin/release/next). Left in
+// place, such an upstream silently redirects a bare `git push` to that base branch
+// when the user's push.default is `upstream`/`tracking`, which is how a
+// feature-branch push ends up rejected against a protected base. A deliberately
+// configured upstream on a *different remote* (e.g. a fork's `upstream` remote) is
+// left untouched — grove only manages same-repo tracking.
 func setUpstream(base, branch string) {
-	if GitQuiet(base, "config", "--get", "branch."+branch+".merge") {
+	want := "refs/heads/" + branch
+	remoteOut, _ := GitOut(base, "config", "--get", "branch."+branch+".remote")
+	mergeOut, _ := GitOut(base, "config", "--get", "branch."+branch+".merge")
+	remote := strings.TrimSpace(remoteOut)
+	merge := strings.TrimSpace(mergeOut)
+
+	// Already tracking its own origin branch: nothing to do.
+	if remote == "origin" && merge == want {
+		return
+	}
+	// A deliberate upstream on another remote (fork workflow): leave it alone.
+	if remote != "" && remote != "origin" {
 		return
 	}
 	_ = Git(base, "config", "branch."+branch+".remote", "origin")
-	_ = Git(base, "config", "branch."+branch+".merge", "refs/heads/"+branch)
+	_ = Git(base, "config", "branch."+branch+".merge", want)
 }
 
 // EnsureWorktree returns the worktree dir for branch, creating it if needed.

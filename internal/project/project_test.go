@@ -288,6 +288,24 @@ func TestEnsureWorktreeKeepsExistingUpstream(t *testing.T) {
 	}
 }
 
+// TestEnsureWorktreeFixesBaseBranchUpstream verifies grove repoints a stale
+// upstream left pointing at a *different* branch on origin (the ref the branch was
+// forked from) back to the branch's own same-named origin branch. With
+// push.default=upstream/tracking such an upstream silently redirects a bare
+// `git push` to that base branch (often a protected one), so grove corrects it —
+// unlike the deliberate different-remote case above, which it preserves.
+func TestEnsureWorktreeFixesBaseBranchUpstream(t *testing.T) {
+	p := newTestProject(t)
+	runGit(t, p.Base, "branch", "feature/forked", "main")
+	runGit(t, p.Base, "config", "branch.feature/forked.remote", "origin")
+	runGit(t, p.Base, "config", "branch.feature/forked.merge", "refs/heads/main")
+
+	if _, _, err := p.EnsureWorktree("feature/forked", nil, baseDefault); err != nil {
+		t.Fatalf("EnsureWorktree(feature/forked): %v", err)
+	}
+	assertTracksOrigin(t, p.Base, "feature/forked")
+}
+
 // revParse resolves a rev in dir to its full object id, failing the test on error.
 func revParse(t *testing.T, dir, rev string) string {
 	t.Helper()
