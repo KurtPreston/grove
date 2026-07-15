@@ -267,15 +267,22 @@ func setUpstream(base, branch string) {
 // EnsureWorktree returns the worktree dir for branch, creating it if needed.
 // copyFiles are untracked files copied from the default-branch worktree into
 // freshly created ones. The returned bool reports whether the worktree was
-// created on this call (vs. reused), so callers can drive one-time onCreate
-// behavior.
+// created on this call (vs. reused), so callers can drive one-time
+// onCreateWorktree behavior.
 //
 // pickBase chooses which branch a brand-new branch is based off. It is called
 // only when the branch exists neither locally nor on origin — reusing an
 // existing branch never consults it. It receives the project default branch and
 // returns the branch name to base off (return def to keep the historical
 // "off the default branch" behavior). A nil pickBase defaults to def.
-func (p *Project) EnsureWorktree(branch string, copyFiles []string, pickBase func(def string) (string, error)) (string, bool, error) {
+//
+// beforeCreate, if non-nil, is called only when the branch exists neither
+// locally nor on origin (the same brand-new-branch condition that consults
+// pickBase), after the base branch is resolved but before anything is
+// created. Its error aborts creation — nothing is created and the error is
+// returned to the caller. This is the hook point for grove.json's
+// beforeCreateBranch bucket.
+func (p *Project) EnsureWorktree(branch string, copyFiles []string, pickBase func(def string) (string, error), beforeCreate func() error) (string, bool, error) {
 	if dir, ok := p.WorktreePathFor(branch); ok {
 		ui.Info("Using existing worktree: " + dir)
 		if GitQuiet(dir, "pull", "--ff-only") {
@@ -323,6 +330,11 @@ func (p *Project) EnsureWorktree(branch string, copyFiles []string, pickBase fun
 		baseRef, err := p.resolveBaseRef(baseBranch)
 		if err != nil {
 			return "", false, err
+		}
+		if beforeCreate != nil {
+			if err := beforeCreate(); err != nil {
+				return "", false, err
+			}
 		}
 		ui.Info(fmt.Sprintf("Creating new branch '%s' off %s at %s", branch, baseRef, dir))
 		// --no-track so autoSetupMerge doesn't point upstream at the base ref; we

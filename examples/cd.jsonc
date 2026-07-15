@@ -13,8 +13,10 @@
   // `tmux` recipe so the target is recorded before tmux takes over the terminal.
   "$schema": "https://raw.githubusercontent.com/KurtPreston/grove/main/grove.schema.json",
   "copy": [".env"],
-  "recipes": [
-    { "type": "cd" },
-    { "type": "vscode-color-config" }
-  ]
+  "hooks": {
+    "onOpen": [
+      { "type": "cd" },
+      { "type": "vscode-color-config" }
+    ]
+  }
 }

@@ -28,16 +28,41 @@ const SeedFilename = "grove.jsonc"
 
 // Config is the parsed grove.json. Top-level fields hold the few settings that
 // are not specific to a single recipe; everything else lives on the per-recipe
-// entries in Recipes.
+// entries nested under Hooks.
 type Config struct {
 	// Copy lists untracked files copied from the default-branch worktree into
 	// freshly created worktrees.
 	Copy []string `json:"copy,omitempty"`
-	// Recipes are run, in order, when a branch is opened.
-	Recipes []RecipeConfig `json:"recipes,omitempty"`
+	// Hooks groups the recipes run at each point in a branch's lifecycle. A nil
+	// Hooks (the "hooks" key omitted entirely) falls back to the conventional
+	// single-tmux-recipe default; an explicit "hooks" object (even one that
+	// only sets one bucket) is respected exactly, with the other buckets empty.
+	Hooks *Hooks `json:"hooks,omitempty"`
 	// Prune configures `grove prune` merge detection. When omitted, squash/rebase
 	// detection is on and the forge PR check is off.
 	Prune *PruneConfig `json:"prune,omitempty"`
+}
+
+// Hooks groups the recipes grove runs at each point in a branch's lifecycle.
+// Naming rule: a "before*" bucket is a gate that runs first and can abort by
+// returning a non-zero exit; an "on*" bucket is a reaction to an event that
+// already happened and never aborts (failures just warn).
+type Hooks struct {
+	// BeforeCreateBranch runs only when a brand-new branch (one that exists
+	// neither locally nor on origin) is about to be created, before the worktree
+	// or branch exist. Any recipe exiting non-zero aborts creation entirely -
+	// nothing is created. Not run for `grove path`, and not run when reusing an
+	// existing local/origin branch (only truly new branches are gated).
+	BeforeCreateBranch []RecipeConfig `json:"beforeCreateBranch,omitempty"`
+	// OnCreateWorktree runs once, when a worktree is freshly created - which
+	// includes checking out an existing local/origin branch into a new
+	// worktree, not just brand-new branches. Also runs on `grove open --force`
+	// against an existing worktree. Failures warn but don't abort. This is the
+	// bucket for one-time setup (e.g. `yarn install`).
+	OnCreateWorktree []RecipeConfig `json:"onCreateWorktree,omitempty"`
+	// OnOpen runs on every open: creating, reopening, and a plain-folder
+	// `grove launch`/`here`. Failures warn but don't abort.
+	OnOpen []RecipeConfig `json:"onOpen,omitempty"`
 }
 
 // PruneConfig holds the settings `grove prune` uses to decide which worktrees'
@@ -85,18 +110,38 @@ func (c Config) ForgeRepo() string {
 	return c.Prune.Forge.Repo
 }
 
-// RecipeConfig is one entry in the recipes array: a recipe Type plus the
+// BeforeCreateBranch returns the recipes gating brand-new branch creation, or
+// nil when Hooks is unset.
+func (c Config) BeforeCreateBranch() []RecipeConfig {
+	if c.Hooks == nil {
+		return nil
+	}
+	return c.Hooks.BeforeCreateBranch
+}
+
+// OnCreateWorktree returns the recipes run once when a worktree is freshly
+// created, or nil when Hooks is unset.
+func (c Config) OnCreateWorktree() []RecipeConfig {
+	if c.Hooks == nil {
+		return nil
+	}
+	return c.Hooks.OnCreateWorktree
+}
+
+// OnOpen returns the recipes run on every open, or nil when Hooks is unset.
+func (c Config) OnOpen() []RecipeConfig {
+	if c.Hooks == nil {
+		return nil
+	}
+	return c.Hooks.OnOpen
+}
+
+// RecipeConfig is one entry in a hooks bucket: a recipe Type plus the
 // type-specific settings it needs. Fields not relevant to a given type are
-// simply left unset.
+// simply left unset. Which bucket an entry lives in decides when it runs; see
+// Hooks.
 type RecipeConfig struct {
 	Type string `json:"type"`
-
-	// Lifecycle gate shared by every recipe. Both default to true when unset
-	// (nil): OnCreate lets a recipe run when a worktree is freshly created,
-	// OnOpen lets it run on every open (create, reopen, and plain-folder
-	// launch). Set OnOpen to false for one-time, create-only setup.
-	OnCreate *bool `json:"onCreate,omitempty"`
-	OnOpen   *bool `json:"onOpen,omitempty"`
 
 	// webhook
 	URL    string         `json:"url,omitempty"`
@@ -112,11 +157,11 @@ type RecipeConfig struct {
 }
 
 // Defaults returns the configuration used when no grove.json is present: a
-// single tmux recipe and the conventional .env copy.
+// single tmux recipe (on every open) and the conventional .env copy.
 func Defaults() Config {
 	return Config{
-		Copy:    []string{".env"},
-		Recipes: []RecipeConfig{{Type: "tmux"}},
+		Copy:  []string{".env"},
+		Hooks: &Hooks{OnOpen: []RecipeConfig{{Type: "tmux"}}},
 	}
 }
 
@@ -139,11 +184,18 @@ func Load(projectDir string) (Config, error) {
 		return Defaults(), nil
 	}
 
-	// Start from defaults so an omitted "copy"/"recipes" key keeps the
-	// conventional behavior, while an explicit (even empty) value overrides it.
+	// Start from defaults so an omitted "copy" key keeps the conventional
+	// behavior, while an explicit (even empty) value overrides it. Hooks is
+	// cleared first: encoding/json unmarshals into an existing non-nil pointer
+	// by reusing its underlying struct, which would merge a partial "hooks"
+	// object into the default's OnOpen bucket instead of replacing it.
 	cfg := Defaults()
+	cfg.Hooks = nil
 	if err := json.Unmarshal(b, &cfg); err != nil {
 		return Defaults(), err
+	}
+	if cfg.Hooks == nil {
+		cfg.Hooks = Defaults().Hooks
 	}
 	cfg.validate()
 	return cfg, nil
@@ -234,19 +286,31 @@ func Seed(projectDir string) error {
 // type requires. It never fails: grove stays usable so a single bad entry does
 // not block opening a branch.
 func (c Config) validate() {
-	for i, r := range c.Recipes {
-		if r.Type == "" {
-			ui.Warn("grove.json: recipes[" + strconv.Itoa(i) + "] is missing \"type\"; ignoring.")
-			continue
-		}
-		switch r.Type {
-		case "webhook":
-			if r.URL == "" {
-				ui.Warn("grove.json: webhook recipe is missing \"url\"; it will be skipped.")
+	if c.Hooks == nil {
+		return
+	}
+	for _, bucket := range []struct {
+		name    string
+		recipes []RecipeConfig
+	}{
+		{"beforeCreateBranch", c.Hooks.BeforeCreateBranch},
+		{"onCreateWorktree", c.Hooks.OnCreateWorktree},
+		{"onOpen", c.Hooks.OnOpen},
+	} {
+		for i, r := range bucket.recipes {
+			if r.Type == "" {
+				ui.Warn("grove.json: hooks." + bucket.name + "[" + strconv.Itoa(i) + "] is missing \"type\"; ignoring.")
+				continue
 			}
-		case "command":
-			if r.Command == "" {
-				ui.Warn("grove.json: command recipe is missing \"command\"; it will be skipped.")
+			switch r.Type {
+			case "webhook":
+				if r.URL == "" {
+					ui.Warn("grove.json: webhook recipe (hooks." + bucket.name + ") is missing \"url\"; it will be skipped.")
+				}
+			case "command":
+				if r.Command == "" {
+					ui.Warn("grove.json: command recipe (hooks." + bucket.name + ") is missing \"command\"; it will be skipped.")
+				}
 			}
 		}
 	}

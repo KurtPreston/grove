@@ -3,10 +3,12 @@
 // here; anything not built in is looked up as an external `grove-recipe-<name>`
 // executable on PATH, so users can add their own without touching grove.
 //
-// A recipe's configuration travels with it: each entry in grove.json's recipes
-// array carries a type plus the settings that type needs. Built-in recipes
-// receive that entry directly; external recipes receive it as GROVE_RECIPE_*
-// environment variables alongside the shared Context env.
+// A recipe's configuration travels with it: each entry in one of grove.json's
+// "hooks" buckets (config.Hooks) carries a type plus the settings that type
+// needs. Built-in recipes receive that entry directly; external recipes
+// receive it as GROVE_RECIPE_* environment variables alongside the shared
+// Context env. Which bucket an entry lives in decides when it runs and whether
+// a failure aborts (Run) or is fatal (RunBefore) - see config.Hooks.
 package recipe
 
 import (
@@ -35,13 +37,10 @@ type Context struct {
 	InSSH         bool
 
 	// Created reports whether the worktree was created on this invocation (vs.
-	// an existing one being reopened). The lifecycle gate (see shouldRun) uses
-	// it so onCreate-only recipes run only on fresh worktrees.
+	// an existing one being reopened). Exported as GROVE_CREATED so recipes can
+	// tell the two apart; which bucket a recipe lives in already decides
+	// whether it runs (see config.Hooks), so this is informational.
 	Created bool
-
-	// Force requests that create-only recipes run even when the worktree
-	// already existed. Set by `grove open --force`.
-	Force bool
 }
 
 // Env renders the context as environment variables for external recipes,
@@ -83,56 +82,59 @@ var registry = map[string]Recipe{}
 // Register adds a built-in recipe. Called from builtin package init().
 func Register(name string, r Recipe) { registry[name] = r }
 
-// Run executes each configured recipe in order: a built-in if registered, else
-// an external `grove-recipe-<type>` on PATH. Unknown recipes warn but don't
-// abort. Entries without a type are skipped (config.Load already warned).
+// runOne runs a single recipe entry: a built-in if registered, else an
+// external `grove-recipe-<type>` on PATH. Returns an error if the type is
+// unknown or the handler/process fails; callers decide whether that's fatal.
+func runOne(ctx Context, rc config.RecipeConfig) error {
+	name := rc.Type
+	if r, ok := registry[name]; ok {
+		ui.Info("recipe: " + name)
+		return r(ctx, rc)
+	}
+	bin := "grove-recipe-" + name
+	path, err := exec.LookPath(bin)
+	if err != nil {
+		return fmt.Errorf("unknown recipe: %s (no built-in and no %s on PATH)", name, bin)
+	}
+	ui.Info("recipe: " + name + " (external)")
+	cmd := exec.Command(path)
+	cmd.Env = append(ctx.Env(), recipeEnv(ctx, rc)...)
+	cmd.Stdin = os.Stdin
+	cmd.Stdout = os.Stderr
+	cmd.Stderr = os.Stderr
+	return cmd.Run()
+}
+
+// Run executes each configured recipe in order, warning (but not aborting) on
+// failure - including an unknown type. Used for the onCreateWorktree and
+// onOpen buckets, which react to something that has already happened.
+// Entries without a type are skipped (config.Load already warned).
 func Run(recipes []config.RecipeConfig, ctx Context) {
 	for _, rc := range recipes {
-		name := rc.Type
-		if name == "" {
+		if rc.Type == "" {
 			continue
 		}
-		if !shouldRun(rc, ctx) {
-			ui.Info("recipe: " + name + " (skipped: does not run on this open; use --force or set onOpen)")
-			continue
+		if err := runOne(ctx, rc); err != nil {
+			ui.Warn(fmt.Sprintf("recipe %s failed: %v", rc.Type, err))
 		}
-		if r, ok := registry[name]; ok {
-			ui.Info("recipe: " + name)
-			if err := r(ctx, rc); err != nil {
-				ui.Warn(fmt.Sprintf("recipe %s failed: %v", name, err))
-			}
-			continue
-		}
-		bin := "grove-recipe-" + name
-		if path, err := exec.LookPath(bin); err == nil {
-			ui.Info("recipe: " + name + " (external)")
-			cmd := exec.Command(path)
-			cmd.Env = append(ctx.Env(), recipeEnv(ctx, rc)...)
-			cmd.Stdin = os.Stdin
-			cmd.Stdout = os.Stderr
-			cmd.Stderr = os.Stderr
-			if err := cmd.Run(); err != nil {
-				ui.Warn(fmt.Sprintf("recipe %s failed: %v", name, err))
-			}
-			continue
-		}
-		ui.Warn("unknown recipe: " + name + " (no built-in and no grove-recipe-" + name + " on PATH)")
 	}
 }
 
-// shouldRun applies the shared lifecycle gate to a recipe entry. Both flags
-// default to true (nil). A fresh create (or --force) is also the first open, so
-// on a create event a recipe runs if either onCreate or onOpen is set; on a
-// reopen (or plain-folder launch) it runs only if onOpen is set.
-func shouldRun(rc config.RecipeConfig, ctx Context) bool {
-	if ctx.Created || ctx.Force {
-		return runsOnCreate(rc) || runsOnOpen(rc)
+// RunBefore executes each configured recipe in order, stopping at and
+// returning the first error. Used for the beforeCreateBranch bucket: it gates
+// branch creation, so a non-zero exit (or an unknown type) must abort before
+// anything is created. Entries without a type are skipped.
+func RunBefore(recipes []config.RecipeConfig, ctx Context) error {
+	for _, rc := range recipes {
+		if rc.Type == "" {
+			continue
+		}
+		if err := runOne(ctx, rc); err != nil {
+			return fmt.Errorf("recipe %s failed: %w", rc.Type, err)
+		}
 	}
-	return runsOnOpen(rc)
+	return nil
 }
-
-func runsOnCreate(rc config.RecipeConfig) bool { return rc.OnCreate == nil || *rc.OnCreate }
-func runsOnOpen(rc config.RecipeConfig) bool   { return rc.OnOpen == nil || *rc.OnOpen }
 
 // recipeEnv exports a recipe's configuration entry as GROVE_RECIPE_* variables
 // so external recipes can read the same settings the built-ins receive. String

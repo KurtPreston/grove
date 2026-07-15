@@ -64,8 +64,8 @@ func TestSeedWritesParseableJSONC(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load of seeded config: %v", err)
 	}
-	if len(cfg.Recipes) == 0 {
-		t.Fatal("seeded config parsed to zero recipes")
+	if cfg.Hooks == nil || len(cfg.Hooks.BeforeCreateBranch)+len(cfg.Hooks.OnCreateWorktree)+len(cfg.Hooks.OnOpen) == 0 {
+		t.Fatal("seeded config parsed to zero hooks")
 	}
 
 	// Re-seeding must not clobber an existing config (jsonc or json).
@@ -81,6 +81,49 @@ func TestSeedWritesParseableJSONC(t *testing.T) {
 	}
 	if len(cfg.Copy) != 1 || cfg.Copy[0] != "mine" {
 		t.Errorf("Seed clobbered an existing config: copy=%#v", cfg.Copy)
+	}
+}
+
+// TestLoadDefaultsHooksWhenOmitted verifies an omitted "hooks" key falls back
+// to the conventional single-tmux-recipe default (onOpen bucket).
+func TestLoadDefaultsHooksWhenOmitted(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "grove.json"), []byte(`{"copy":["x"]}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(dir)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.Hooks == nil || len(cfg.Hooks.OnOpen) != 1 || cfg.Hooks.OnOpen[0].Type != "tmux" {
+		t.Errorf("expected default tmux-only onOpen hook, got %#v", cfg.Hooks)
+	}
+	if len(cfg.Hooks.BeforeCreateBranch) != 0 || len(cfg.Hooks.OnCreateWorktree) != 0 {
+		t.Errorf("expected empty beforeCreateBranch/onCreateWorktree by default, got %#v", cfg.Hooks)
+	}
+}
+
+// TestLoadPartialHooksDoesNotMergeDefaults guards against a subtle
+// encoding/json pitfall: unmarshaling into an existing non-nil *Hooks (as
+// Defaults() would produce) reuses that struct instead of replacing it, which
+// would leave the default tmux onOpen recipe present alongside a project's own
+// explicit hooks. A partial "hooks" object must be respected exactly, with
+// unset buckets empty.
+func TestLoadPartialHooksDoesNotMergeDefaults(t *testing.T) {
+	dir := t.TempDir()
+	src := `{"hooks": {"beforeCreateBranch": [{"type": "command", "command": "check.sh"}]}}`
+	if err := os.WriteFile(filepath.Join(dir, "grove.json"), []byte(src), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(dir)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if len(cfg.Hooks.BeforeCreateBranch) != 1 || cfg.Hooks.BeforeCreateBranch[0].Command != "check.sh" {
+		t.Errorf("beforeCreateBranch = %#v, want the configured command entry", cfg.Hooks.BeforeCreateBranch)
+	}
+	if len(cfg.Hooks.OnOpen) != 0 {
+		t.Errorf("onOpen = %#v, want empty (must not inherit the default tmux recipe)", cfg.Hooks.OnOpen)
 	}
 }
 

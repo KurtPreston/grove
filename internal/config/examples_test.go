@@ -29,8 +29,8 @@ func TestExampleConfigsParse(t *testing.T) {
 			t.Errorf("%s: does not parse as JSONC config: %v", p, err)
 			continue
 		}
-		if len(cfg.Recipes) == 0 {
-			t.Errorf("%s: parsed to zero recipes", p)
+		if cfg.Hooks == nil || len(cfg.Hooks.BeforeCreateBranch)+len(cfg.Hooks.OnCreateWorktree)+len(cfg.Hooks.OnOpen) == 0 {
+			t.Errorf("%s: parsed to zero hooks", p)
 		}
 	}
 }

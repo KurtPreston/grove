@@ -1,6 +1,7 @@
 package project
 
 import (
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -251,7 +252,7 @@ func TestEnsureWorktreeSetsUpstream(t *testing.T) {
 	p := newTestProject(t)
 
 	// Path: brand-new branch off the default.
-	if _, _, err := p.EnsureWorktree("feature/new", nil, baseDefault); err != nil {
+	if _, _, err := p.EnsureWorktree("feature/new", nil, baseDefault, nil); err != nil {
 		t.Fatalf("EnsureWorktree(feature/new): %v", err)
 	}
 	assertTracksOrigin(t, p.Base, "feature/new")
@@ -259,7 +260,7 @@ func TestEnsureWorktreeSetsUpstream(t *testing.T) {
 	// Path: a local branch that already exists in the bare repo with no tracking
 	// config (e.g. carried over from a full clone).
 	runGit(t, p.Base, "branch", "local/only", "main")
-	if _, _, err := p.EnsureWorktree("local/only", nil, baseDefault); err != nil {
+	if _, _, err := p.EnsureWorktree("local/only", nil, baseDefault, nil); err != nil {
 		t.Fatalf("EnsureWorktree(local/only): %v", err)
 	}
 	assertTracksOrigin(t, p.Base, "local/only")
@@ -277,7 +278,7 @@ func TestEnsureWorktreeKeepsExistingUpstream(t *testing.T) {
 	runGit(t, p.Base, "config", "branch.tracked.remote", "upstream")
 	runGit(t, p.Base, "config", "branch.tracked.merge", "refs/heads/somewhere")
 
-	if _, _, err := p.EnsureWorktree("tracked", nil, baseDefault); err != nil {
+	if _, _, err := p.EnsureWorktree("tracked", nil, baseDefault, nil); err != nil {
 		t.Fatalf("EnsureWorktree(tracked): %v", err)
 	}
 	if got := gitConfig(t, p.Base, "branch.tracked.remote"); got != "upstream" {
@@ -300,7 +301,7 @@ func TestEnsureWorktreeFixesBaseBranchUpstream(t *testing.T) {
 	runGit(t, p.Base, "config", "branch.feature/forked.remote", "origin")
 	runGit(t, p.Base, "config", "branch.feature/forked.merge", "refs/heads/main")
 
-	if _, _, err := p.EnsureWorktree("feature/forked", nil, baseDefault); err != nil {
+	if _, _, err := p.EnsureWorktree("feature/forked", nil, baseDefault, nil); err != nil {
 		t.Fatalf("EnsureWorktree(feature/forked): %v", err)
 	}
 	assertTracksOrigin(t, p.Base, "feature/forked")
@@ -327,7 +328,7 @@ func TestEnsureWorktreeBasesOffChosenBranch(t *testing.T) {
 	commitFile(t, filepath.Join(p.Dir, "branch1"), "b1.txt", "b1", "branch1 commit")
 
 	base := func(def string) (string, error) { return "branch1", nil }
-	if _, _, err := p.EnsureWorktree("feature/off-branch1", nil, base); err != nil {
+	if _, _, err := p.EnsureWorktree("feature/off-branch1", nil, base, nil); err != nil {
 		t.Fatalf("EnsureWorktree(feature/off-branch1): %v", err)
 	}
 
@@ -339,6 +340,45 @@ func TestEnsureWorktreeBasesOffChosenBranch(t *testing.T) {
 		t.Errorf("new branch tip should differ from main (%s); it looks based off main, not branch1", mainTip)
 	}
 	assertTracksOrigin(t, p.Base, "feature/off-branch1")
+}
+
+// TestEnsureWorktreeBeforeCreateAbortsOnError verifies a beforeCreate hook
+// that returns an error aborts creation entirely — the branch and worktree are
+// never created — and that its error propagates to the caller. This is the
+// grove.json beforeCreateBranch bucket's abort contract.
+func TestEnsureWorktreeBeforeCreateAbortsOnError(t *testing.T) {
+	p := newTestProject(t)
+	wantErr := errors.New("ticket check failed")
+
+	_, _, err := p.EnsureWorktree("feature/new", nil, baseDefault, func() error { return wantErr })
+	if !errors.Is(err, wantErr) {
+		t.Fatalf("EnsureWorktree error = %v, want %v", err, wantErr)
+	}
+	if GitQuiet(p.Base, "show-ref", "--verify", "--quiet", "refs/heads/feature/new") {
+		t.Error("branch feature/new was created despite beforeCreate returning an error")
+	}
+	if pathExists(filepath.Join(p.Dir, "feature", "new")) {
+		t.Error("worktree dir was created despite beforeCreate returning an error")
+	}
+}
+
+// TestEnsureWorktreeBeforeCreateSkippedForExistingBranch verifies beforeCreate
+// only gates brand-new branches: reusing a branch that already exists locally
+// must not consult it, since there is nothing left to abort.
+func TestEnsureWorktreeBeforeCreateSkippedForExistingBranch(t *testing.T) {
+	p := newTestProject(t)
+	runGit(t, p.Base, "branch", "local/only", "main")
+
+	called := false
+	if _, _, err := p.EnsureWorktree("local/only", nil, baseDefault, func() error {
+		called = true
+		return nil
+	}); err != nil {
+		t.Fatalf("EnsureWorktree(local/only): %v", err)
+	}
+	if called {
+		t.Error("beforeCreate was called for a pre-existing local branch")
+	}
 }
 
 // TestResolveBaseRefUnknownBranchErrors ensures a bad base branch (e.g. a typo

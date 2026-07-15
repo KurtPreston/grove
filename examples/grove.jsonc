@@ -6,29 +6,41 @@
   // Untracked files copied from the default-branch worktree into new worktrees.
   "copy": [".env"],
 
-  // Recipes run in order when you open a branch. Each entry has a "type" plus
-  // that type's settings, and may set "onCreate"/"onOpen" (both default true)
-  // to control when it runs. See the other files in this folder for more.
-  "recipes": [
-    // Generate a custom branch color, and write it to .vscode/settings.json for VSCode/Cursor themeing:
-    { "type": "vscode-color-config" },
+  // Hooks group recipes by when they run. Each bucket is an ordered array of
+  // recipe entries (a "type" plus that type's settings). See the other files
+  // in this folder for more.
+  "hooks": {
+    // Runs only for a brand-new branch, before it's created. A non-zero exit
+    // aborts creation entirely - e.g. verify the branch name against a ticket:
+    // "beforeCreateBranch": [
+    //   { "type": "command", "command": "$GROVE_PROJECT_DIR/grove-hook-jira-check.sh" }
+    // ],
 
-    // Move your shell into the worktree on open. Opt-in and requires the shell
-    // integration to be sourced (see cd.jsonc); without it this is a no-op:
-    // { "type": "cd" },
+    // Runs once, when a worktree is freshly created - the place for one-time
+    // bootstrap commands:
+    // "onCreateWorktree": [
+    //   { "type": "command", "command": "npm install" }
+    // ],
 
-    // Open the worktree in Cursor:
-    // { "type": "command", "command": "cursor $GROVE_DIR" },
+    // Runs every time you open a branch (create, reopen, or plain launch).
+    "onOpen": [
+      // Generate a custom branch color, and write it to .vscode/settings.json for VSCode/Cursor themeing:
+      { "type": "vscode-color-config" },
 
-    // Open/focus a window on your workstation over a reverse SSH tunnel (see wsm-remote.jsonc):
-    // { "type": "webhook", "url": "http://127.0.0.1:39788/open", "token": "$GROVE_WEBHOOK_TOKEN", "params": { "host": "devbox", "path": "$GROVE_DIR", "name": "$GROVE_NAME" } },
+      // Move your shell into the worktree on open. Opt-in and requires the shell
+      // integration to be sourced (see cd.jsonc); without it this is a no-op:
+      // { "type": "cd" },
 
-    // Ensure a tmux session with one window per worktree, then attach.
-    // { "type": "tmux", "layout": "shell=,claude=claude" }
+      // Open the worktree in Cursor:
+      // { "type": "command", "command": "cursor $GROVE_DIR" },
 
-    // Commands to bootstrap the branch. "onOpen: false" means it will only run once, when the worktree is created
-    // { "type": "command", "command": "npm install", "onOpen": false },
-  ],
+      // Open/focus a window on your workstation over a reverse SSH tunnel (see wsm-remote.jsonc):
+      // { "type": "webhook", "url": "http://127.0.0.1:39788/open", "token": "$GROVE_WEBHOOK_TOKEN", "params": { "host": "devbox", "path": "$GROVE_DIR", "name": "$GROVE_NAME" } },
+
+      // Ensure a tmux session with one window per worktree, then attach.
+      // { "type": "tmux", "layout": "shell=,claude=claude" }
+    ],
+  },
 
   // Tune `grove prune` merge detection. Squash/rebase detection is on by default;
   // enable "forge" to also treat branches with a merged PR (via the gh CLI) as prunable.

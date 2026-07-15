@@ -118,16 +118,18 @@ func cmdClone(args []string) {
 	if err := config.Seed(p.Dir); err != nil {
 		ui.Warn("could not write starter " + config.SeedFilename + ": " + err.Error())
 	} else {
-		ui.Info("Wrote starter " + config.SeedFilename + " (edit it to configure recipes).")
+		ui.Info("Wrote starter " + config.SeedFilename + " (edit it to configure hooks).")
 	}
 	cfg := loadCfg(p)
-	recipe.Run(cfg.Recipes, buildContext(p, branch, dir, true, false))
+	ctx := buildContext(p, branch, dir, true)
+	recipe.Run(cfg.OnCreateWorktree(), ctx)
+	recipe.Run(cfg.OnOpen(), ctx)
 }
 
-// cmdOpen: grove open [BRANCH] [RECIPES] [--force]. BRANCH omitted or "." infers
-// the current worktree's branch; RECIPES (a comma-separated list of recipe
-// types) filters grove.json's recipes to only those types. --force re-runs
-// create-only recipes ("onOpen": false) on an existing worktree.
+// cmdOpen: grove open [BRANCH] [TYPES] [--force]. BRANCH omitted or "." infers
+// the current worktree's branch; TYPES (a comma-separated list of recipe
+// types) filters grove.json's hooks to only those types. --force re-runs the
+// onCreateWorktree bucket (one-time setup) on an existing worktree.
 func cmdOpen(args []string) {
 	p := mustResolve()
 	args, force := popForce(args)
@@ -181,11 +183,19 @@ func cmdSwitch(args []string) {
 
 func doOpen(p *project.Project, branch, filter, from string, force bool) {
 	cfg := loadCfg(p)
-	dir, created, err := p.EnsureWorktree(branch, cfg.Copy, baseResolver(p, from))
+	beforeCtx := buildBeforeContext(p, branch)
+	beforeCreate := func() error {
+		return recipe.RunBefore(filterRecipes(cfg.BeforeCreateBranch(), filter), beforeCtx)
+	}
+	dir, created, err := p.EnsureWorktree(branch, cfg.Copy, baseResolver(p, from), beforeCreate)
 	if err != nil {
 		ui.Die(err.Error())
 	}
-	recipe.Run(filterRecipes(cfg.Recipes, filter), buildContext(p, branch, dir, created, force))
+	ctx := buildContext(p, branch, dir, created)
+	if created || force {
+		recipe.Run(filterRecipes(cfg.OnCreateWorktree(), filter), ctx)
+	}
+	recipe.Run(filterRecipes(cfg.OnOpen(), filter), ctx)
 }
 
 // filterRecipes restricts recipes to those whose type appears in the
@@ -255,7 +265,9 @@ func cmdPath(args []string) {
 		ui.Die("usage: grove path BRANCH")
 	}
 	branch := trimSlash(args[0])
-	dir, _, err := p.EnsureWorktree(branch, loadCfg(p).Copy, baseResolver(p, from))
+	// nil beforeCreate: grove path is used by scripts/tooling, so it never
+	// runs the (interactive-leaning, abortable) beforeCreateBranch bucket.
+	dir, _, err := p.EnsureWorktree(branch, loadCfg(p).Copy, baseResolver(p, from), nil)
 	if err != nil {
 		ui.Die(err.Error())
 	}
@@ -284,12 +296,23 @@ func cmdTmux() {
 	tmux.AttachOrSwitch(session, project.Sanitize(p.DefaultBranch()))
 }
 
-// tmuxLayout returns the layout from the config's tmux recipe entry, or the
-// built-in default when there is no tmux recipe.
+// tmuxLayout returns the layout from the config's tmux recipe entry (checked
+// across all three hooks buckets, since nothing stops a tmux recipe from
+// living in any of them), or the built-in default when there is no tmux
+// recipe.
 func tmuxLayout(cfg config.Config) string {
-	for _, r := range cfg.Recipes {
-		if r.Type == "tmux" {
-			return builtin.LayoutOr(r.Layout)
+	if cfg.Hooks == nil {
+		return builtin.DefaultLayout
+	}
+	for _, bucket := range [][]config.RecipeConfig{
+		cfg.Hooks.BeforeCreateBranch,
+		cfg.Hooks.OnCreateWorktree,
+		cfg.Hooks.OnOpen,
+	} {
+		for _, r := range bucket {
+			if r.Type == "tmux" {
+				return builtin.LayoutOr(r.Layout)
+			}
 		}
 	}
 	return builtin.DefaultLayout
@@ -559,7 +582,7 @@ func cmdVersion() {
 	fmt.Printf("grove %s (commit %s, built %s)\n", version, commit, date)
 }
 
-// cmdLaunch: grove launch [DIR] / grove here. Runs the user-level recipes
+// cmdLaunch: grove launch [DIR] / grove here. Runs the user-level onOpen hooks
 // (~/.config/grove/config.json) against DIR (or cwd) without requiring a grove
 // project or creating a worktree. Used directly and as the fallback for bare
 // grove invocations outside a grove project.
@@ -582,19 +605,19 @@ func cmdLaunch(args []string) {
 	}
 	if !found {
 		path, _ := config.UserConfigPath()
-		ui.Die("no user recipes configured; create " + path +
-			` with a "recipes" array (e.g. vscode-color-config, webhook).`)
+		ui.Die("no user hooks configured; create " + path +
+			` with a "hooks": {"onOpen": [...]} object (e.g. vscode-color-config, webhook).`)
 	}
 
 	name := filepath.Base(abs)
-	recipe.Run(cfg.Recipes, buildLaunchContext(name, abs))
+	recipe.Run(cfg.OnOpen(), buildLaunchContext(name, abs))
 }
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
-func buildContext(p *project.Project, branch, dir string, created, force bool) recipe.Context {
+func buildContext(p *project.Project, branch, dir string, created bool) recipe.Context {
 	hex := color.ForBranch(branch)
 	return recipe.Context{
 		Branch:        branch,
@@ -607,7 +630,25 @@ func buildContext(p *project.Project, branch, dir string, created, force bool) r
 		DefaultBranch: p.DefaultBranch(),
 		InSSH:         inSSH,
 		Created:       created,
-		Force:         force,
+	}
+}
+
+// buildBeforeContext builds the recipe.Context passed to the
+// beforeCreateBranch bucket. It runs before anything is created, so Dir is the
+// worktree's planned (not yet real) path — useful as GROVE_DIR for a hook that
+// wants to know where the worktree will land — and Created is always false.
+func buildBeforeContext(p *project.Project, branch string) recipe.Context {
+	hex := color.ForBranch(branch)
+	return recipe.Context{
+		Branch:        branch,
+		Dir:           filepath.Join(p.Dir, project.Sanitize(branch)),
+		Color:         hex,
+		Fg:            color.FgForHex(hex),
+		Project:       p.Name(),
+		ProjectDir:    p.Dir,
+		Base:          p.Base,
+		DefaultBranch: p.DefaultBranch(),
+		InSSH:         inSSH,
 	}
 }
 
@@ -846,31 +887,37 @@ Usage:
   grove version                  Print the grove version and build metadata
   grove help                     Show this help
 
-Pass --force to open/switch to re-run create-only recipes ("onOpen": false) on an existing worktree.
+Pass --force to open/switch to re-run the onCreateWorktree bucket (one-time setup)
+on an existing worktree.
 
-When a branch doesn't exist yet, grove creates it. If you're on a non-default branch and
-stdin is a TTY, grove asks which branch to base the new branch off (fzf when available,
-else a numbered menu). Pass --from REF to choose the base non-interactively (also used by
-scripts and non-TTY sessions); otherwise the new branch is based off the default branch.
+When a branch doesn't exist yet, grove creates it. Before creating it, grove runs
+the beforeCreateBranch hooks (if any); a non-zero exit aborts creation entirely.
+If you're on a non-default branch and stdin is a TTY, grove then asks which branch
+to base the new branch off (fzf when available, else a numbered menu). Pass --from
+REF to choose the base non-interactively (also used by scripts and non-TTY
+sessions); otherwise the new branch is based off the default branch.
 
 Worktree folders deleted outside grove (e.g. 'rm -rf') are reconciled automatically
 on the next command: grove drops git's stale bookkeeping so the worktree stops
 showing up and the branch can be checked out again. Branch refs are always kept.
 
 Configuration lives in grove.json (or grove.jsonc, with comments/trailing commas)
-at the project root (beside .base), validated by grove.schema.json. It declares an
-ordered "recipes" array; each entry has a "type" plus that type's settings, and may
-set "onCreate"/"onOpen" (both default true) to gate when it runs. Built-in types:
-tmux, vscode-color-config, webhook, command, cd. Any other type resolves to
-grove-recipe-<type> on PATH (settings exported as GROVE_RECIPE_*). The top-level
-"copy" array tunes which files are copied. The optional "cd" recipe moves your
-shell into the worktree and requires the shell integration to be sourced.
+at the project root (beside .base), validated by grove.schema.json. It declares a
+"hooks" object with three buckets, each an ordered array of recipes (a "type" plus
+that type's settings):
+  beforeCreateBranch  gates a brand-new branch; a non-zero exit aborts creation
+  onCreateWorktree    runs once, when a worktree is freshly created (one-time setup)
+  onOpen              runs on every open: creating, reopening, or a plain launch
+Built-in recipe types: tmux, vscode-color-config, webhook, command, cd. Any other
+type resolves to grove-recipe-<type> on PATH (settings exported as GROVE_RECIPE_*).
+The top-level "copy" array tunes which files are copied. The optional "cd" recipe
+moves your shell into the worktree and requires the shell integration to be sourced.
 Branch colors are derived automatically from a hash of the branch name.
 'grove clone' seeds a starter grove.jsonc.
 
-Outside a grove project, 'grove' (or 'grove launch [DIR]') runs the recipes from a
-user-level config at $XDG_CONFIG_HOME/grove/config.json (default ~/.config/grove/config.json)
+Outside a grove project, 'grove' (or 'grove launch [DIR]') runs the onOpen hooks from
+a user-level config at $XDG_CONFIG_HOME/grove/config.json (default ~/.config/grove/config.json)
 against the directory, using the folder name for the color and webhook view. No
-default recipe is assumed: with no user config, the launch is a no-op error.
+default hooks are assumed: with no user config, the launch is a no-op error.
 `)
 }

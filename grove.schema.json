@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://raw.githubusercontent.com/KurtPreston/grove/main/grove.schema.json",
   "title": "grove project configuration",
-  "description": "Machine-local grove.json (or grove.jsonc) that lives at a grove project root (beside the bare .base repo). Declares the recipes grove runs when a branch is opened, plus a few cross-recipe settings. The .jsonc variant (and either extension) tolerates // and /* */ comments and trailing commas.",
+  "description": "Machine-local grove.json (or grove.jsonc) that lives at a grove project root (beside the bare .base repo). Declares the recipes grove runs at each point in a branch's lifecycle (hooks), plus a few cross-recipe settings. The .jsonc variant (and either extension) tolerates // and /* */ comments and trailing commas.",
   "type": "object",
   "additionalProperties": false,
   "properties": {
@@ -15,10 +15,27 @@
       "description": "Untracked files copied from the default-branch worktree into freshly created worktrees.",
       "items": { "type": "string" }
     },
-    "recipes": {
-      "type": "array",
-      "description": "Ordered recipes run when a branch is opened.",
-      "items": { "$ref": "#/$defs/recipe" }
+    "hooks": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Recipes grouped by when they run. Naming rule: a \"before*\" bucket is a gate that runs first and can abort by exiting non-zero; an \"on*\" bucket is a reaction to an event that already happened (failures only warn).",
+      "properties": {
+        "beforeCreateBranch": {
+          "type": "array",
+          "description": "Runs only when a brand-new branch (neither local nor on origin) is about to be created, before the worktree or branch exist. A non-zero exit aborts creation entirely. Not run by `grove path`, and not run when reusing an existing local/origin branch.",
+          "items": { "$ref": "#/$defs/recipe" }
+        },
+        "onCreateWorktree": {
+          "type": "array",
+          "description": "Runs once, when a worktree is freshly created - including checking out an existing local/origin branch into a new worktree, not just brand-new branches. Also re-run by `grove open --force` on an existing worktree. Failures warn but don't abort. The bucket for one-time setup (e.g. `yarn install`).",
+          "items": { "$ref": "#/$defs/recipe" }
+        },
+        "onOpen": {
+          "type": "array",
+          "description": "Runs on every open: creating, reopening, and a plain-folder `grove launch`/`here`. Failures warn but don't abort.",
+          "items": { "$ref": "#/$defs/recipe" }
+        }
+      }
     },
     "prune": {
       "type": "object",
@@ -55,14 +72,6 @@
         "type": {
           "type": "string",
           "description": "Recipe type. Built-ins: tmux, vscode-color-config, webhook, command, cd. Any other value resolves to grove-recipe-<type> on PATH."
-        },
-        "onCreate": {
-          "type": "boolean",
-          "description": "Run when a worktree is freshly created (default: true)."
-        },
-        "onOpen": {
-          "type": "boolean",
-          "description": "Run on every open - create, reopen, or plain-folder launch (default: true). Set false for one-time, create-only setup."
         }
       },
       "allOf": [
@@ -72,8 +81,6 @@
             "required": ["url"],
             "properties": {
               "type": { "const": "webhook" },
-              "onCreate": { "type": "boolean" },
-              "onOpen": { "type": "boolean" },
               "url": {
                 "type": "string",
                 "description": "Target URL, e.g. http://127.0.0.1:39788/open via a reverse SSH tunnel."
@@ -96,8 +103,6 @@
           "then": {
             "properties": {
               "type": { "const": "tmux" },
-              "onCreate": { "type": "boolean" },
-              "onOpen": { "type": "boolean" },
               "layout": {
                 "type": "string",
                 "description": "tmux panes as name=cmd pairs, comma-separated (e.g. shell=,claude=claude)."
@@ -112,11 +117,9 @@
             "required": ["command"],
             "properties": {
               "type": { "const": "command" },
-              "onCreate": { "type": "boolean" },
-              "onOpen": { "type": "boolean" },
               "command": {
                 "type": "string",
-                "description": "Shell command run in the worktree through a login shell (e.g. nvm use && yarn install). Pair with \"onOpen\": false for one-time setup on new worktrees only."
+                "description": "Shell command run through a login shell (e.g. nvm use && yarn install). Runs in the worktree directory, or the project root when placed in beforeCreateBranch (the worktree doesn't exist yet)."
               },
               "shell": {
                 "type": "string",
@@ -130,9 +133,7 @@
           "if": { "properties": { "type": { "const": "vscode-color-config" } } },
           "then": {
             "properties": {
-              "type": { "const": "vscode-color-config" },
-              "onCreate": { "type": "boolean" },
-              "onOpen": { "type": "boolean" }
+              "type": { "const": "vscode-color-config" }
             },
             "additionalProperties": false
           }
@@ -142,9 +143,7 @@
           "then": {
             "description": "Move the calling shell into the worktree. Requires grove's shell integration (shell/grove.bash or grove.fish) to be sourced; without it grove cannot change your shell's directory.",
             "properties": {
-              "type": { "const": "cd" },
-              "onCreate": { "type": "boolean" },
-              "onOpen": { "type": "boolean" }
+              "type": { "const": "cd" }
             },
             "additionalProperties": false
           }
