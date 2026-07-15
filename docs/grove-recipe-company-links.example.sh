@@ -5,8 +5,12 @@
 # Install: copy to a directory on your PATH as grove-recipe-company-links
 #          chmod +x grove-recipe-company-links
 #
-# grove.json (runs after the webhook recipe so the IDE/desktop exists first):
-#   { "type": "company-links", "url": "http://127.0.0.1:39788/open-url", "token": "$GROVE_WEBHOOK_TOKEN" }
+# grove.json (in hooks.onOpen, after the webhook recipe so the IDE/desktop
+# exists first):
+#   { "hooks": { "onOpen": [
+#     { "type": "webhook", "url": "http://127.0.0.1:39788/open", "token": "$GROVE_WEBHOOK_TOKEN" },
+#     { "type": "company-links", "url": "http://127.0.0.1:39788/open-url", "token": "$GROVE_WEBHOOK_TOKEN" }
+#   ] } }
 #
 # Requires: curl, jq; gh (optional, for PR lookup)
 

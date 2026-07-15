@@ -7,9 +7,9 @@ and `/* */` comments and trailing commas are allowed. Validate against
 
 | File | What it shows |
 |------|---------------|
-| [`grove.jsonc`](grove.jsonc) | The default starter `grove clone` seeds: branch colors + tmux, with commented-out `command`/`webhook` examples. |
-| [`cd.jsonc`](cd.jsonc) | Opt-in auto-cd: a `cd` recipe that moves your shell into the worktree on open (requires the shell integration to be sourced). |
-| [`wsm-remote.jsonc`](wsm-remote.jsonc) | Remote workflow: a `webhook` recipe that POSTs to [wsm](https://github.com/KurtPreston/wsm) over a reverse SSH tunnel to open a window on your workstation. |
+| [`grove.jsonc`](grove.jsonc) | The default starter `grove clone` seeds: branch colors + tmux in `hooks.onOpen`, with commented-out `beforeCreateBranch`/`onCreateWorktree`/`command`/`webhook` examples. |
+| [`cd.jsonc`](cd.jsonc) | Opt-in auto-cd: a `cd` recipe in `hooks.onOpen` that moves your shell into the worktree on open (requires the shell integration to be sourced). |
+| [`wsm-remote.jsonc`](wsm-remote.jsonc) | Remote workflow: a `webhook` recipe in `hooks.onOpen` that POSTs to [wsm](https://github.com/KurtPreston/wsm) over a reverse SSH tunnel to open a window on your workstation. |
 
 `grove.jsonc` is embedded into the grove binary (see [`examples.go`](examples.go))
 and written verbatim by `grove clone`, so editing it here updates the seeded

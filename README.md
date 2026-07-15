@@ -14,7 +14,9 @@ Responsibilities are deliberately separated:
 1. **Worktrees** — one named folder per branch (git is the source of truth; there
    is no separate state file to drift).
 2. **Metadata** — a stable color assigned to each branch.
-3. **Recipes** — trigger a development environment / side effect for the branch.
+3. **Hooks** — recipes that gate or react to a branch's lifecycle (validate a
+   branch before creating it, bootstrap a dev environment, or any other side
+   effect you script yourself).
 
 (1) and (2) are core; (3) is configured in a per-project `grove.json` (see
 [Configuration](#configuration)).
@@ -54,8 +56,8 @@ make install          # builds + installs to ~/.local/bin
 | Command | Description |
 |---------|-------------|
 | `grove clone GIT_URL [FOLDER]` | Clone a repo as a bare `.base` plus a worktree for the default branch under `FOLDER` in the current directory, and seed a starter (commented) `grove.jsonc` |
-| `grove BRANCH [--from REF]` | Switch to (or create) BRANCH's worktree and run the recipes in `grove.json`. When BRANCH is new, `--from REF` bases it off REF (see [Choosing the base branch](#choosing-the-base-branch-for-new-branches)) |
-| `grove open [BRANCH] [TYPES] [--force]` | Open BRANCH (or the current worktree's branch if omitted/`.`); `TYPES` (comma-separated) filters the configured recipes to those types; `--force` re-runs one-time recipes |
+| `grove BRANCH [--from REF]` | Switch to (or create) BRANCH's worktree and run the hooks in `grove.json`. When BRANCH is new, `beforeCreateBranch` hooks can abort creation, and `--from REF` bases it off REF (see [Choosing the base branch](#choosing-the-base-branch-for-new-branches)) |
+| `grove open [BRANCH] [TYPES] [--force]` | Open BRANCH (or the current worktree's branch if omitted/`.`); `TYPES` (comma-separated) filters the configured hooks to those recipe types; `--force` re-runs the `onCreateWorktree` bucket |
 | `grove switch [BRANCH]` | Like a bare BRANCH; with no branch and `fzf` installed, opens a picker |
 | `grove path BRANCH` | Resolve (creating if needed) BRANCH's worktree and print its absolute path to stdout |
 | `grove tmux` | Attach the project's tmux session, building a window for every worktree |
@@ -103,12 +105,13 @@ grove feature/b --from main     # base off main, no prompt
 grove feature/b --from feature/a  # stack feature/b on top of feature/a
 ```
 
-## Recipes
+## Hooks
 
 When you open a branch, grove runs the recipes declared in the project's
-`grove.json` (see [Configuration](#configuration)), in order. Each recipe entry
-has a `type` plus that type's settings. A recipe is either **built-in** or an
-external executable named `grove-recipe-<type>` found on your `PATH`.
+`grove.json` (see [Configuration](#configuration)), grouped into a `hooks`
+object with three buckets that control **when** each recipe runs. Each recipe
+entry has a `type` plus that type's settings. A recipe is either **built-in**
+or an external executable named `grove-recipe-<type>` found on your `PATH`.
 
 Built-in recipes:
 
@@ -117,62 +120,86 @@ Built-in recipes:
 | `tmux` | `layout` | Ensures a per-project tmux session with one window per worktree (colored), one pane per `layout` entry, then attaches/switches |
 | `vscode-color-config` | — | Writes the branch color into the worktree's `.vscode/settings.json` (shared by VSCode and Cursor) and keeps it out of `git status` |
 | `webhook` | `url`, `token`, `params` | POSTs `params` as JSON to `url` (string values support `$VAR` env substitution) |
-| `command` | `command`, `shell` | Runs `command` in the worktree through a login shell. Pair with `"onOpen": false` to run it **once**, only when the worktree is first created |
+| `command` | `command`, `shell` | Runs `command` through a login shell (in the worktree, or the project root for a `beforeCreateBranch` entry — see below) |
 | `cd` | — | Moves the calling shell into the worktree. Opt-in; needs grove's shell integration sourced (see [below](#cd-move-your-shell-into-the-worktree-opt-in)) |
 
-### When recipes run: `onCreate` / `onOpen`
+### The three hooks buckets
 
-Every recipe accepts two boolean flags that gate when it runs. Both **default to
-`true`**:
+The naming rule: a **`before*`** bucket is a gate that runs first and can
+**abort** by exiting non-zero; an **`on*`** bucket is a reaction to something
+that already happened, where a failure only warns and grove continues.
 
-- `onCreate` — run when a worktree is **freshly created**.
-- `onOpen` — run on **every open**: creating, reopening, or a plain-folder
-  `grove launch`/`here`.
+| Bucket | Runs | On failure |
+|--------|------|------------|
+| `beforeCreateBranch` | Only for a **brand-new branch** (one that exists neither locally nor on `origin`), before it's created | **Aborts** — nothing is created |
+| `onCreateWorktree` | Once, when a **worktree is freshly created** — this includes checking out an *existing* local/origin branch into a new worktree, not just brand-new branches. Also re-run by `grove open --force` on an existing worktree | Warns, continues |
+| `onOpen` | On **every open**: creating, reopening, or a plain-folder `grove launch`/`here` | Warns, continues |
 
-Creating a worktree counts as both creating *and* opening it, so a fresh create
-runs any recipe that has either flag set. The practical patterns are:
-
-- **Default** (neither flag set): runs every time you open the branch.
-- **Create-only** (`"onOpen": false`): runs only when the worktree is first
-  created — the old `bootstrap` behavior.
-
-`--force` on `grove open`/`switch` re-runs create-only recipes on a worktree that
-already exists.
-
-### `command`: run a shell command (e.g. per-project setup)
-
-The `command` recipe runs its `command` in the worktree through a **login shell**
-(a no-op when no `command` is set). For one-time setup on new worktrees, add
-`"onOpen": false` and put it *before* `tmux` so it runs before tmux takes over
-the terminal:
+`onCreateWorktree` is the old create-only (`"onOpen": false`) behavior; `onOpen`
+is the old always-run default. `beforeCreateBranch` is new: it's the place for
+a script that validates the branch itself — e.g. checking its name against a
+ticket — before anything exists that would need cleaning up if it's wrong. It
+is **not** run by `grove path` (used by scripts/tooling) and is skipped when
+reusing an existing branch, since there's nothing left to gate.
 
 ```json
 {
-  "recipes": [
-    { "type": "command", "command": "nvm use && yarn install && yarn build", "onOpen": false },
-    { "type": "vscode-color-config" },
-    { "type": "tmux" }
-  ]
+  "hooks": {
+    "beforeCreateBranch": [
+      { "type": "command", "command": "$GROVE_PROJECT_DIR/grove-hook-jira-check.sh" }
+    ],
+    "onCreateWorktree": [
+      { "type": "command", "command": "nvm use && yarn install && yarn build" }
+    ],
+    "onOpen": [
+      { "type": "vscode-color-config" },
+      { "type": "tmux" }
+    ]
+  }
 }
 ```
 
-Now `grove some-branch` in that project creates the worktree and runs the command
-in it once. Notes:
+### `command`: run a shell command (e.g. per-project setup, or a branch-name gate)
 
-- The command runs in the **worktree directory** through a **login shell**
-  (`bash -l` by default) so your shell environment is sourced — that is what
-  makes shell functions like `nvm use` work in a non-interactive run. Override
-  the interpreter with the recipe's `shell` field (e.g. `"shell": "zsh"`).
-- Drop `"onOpen": false` (or set it `true`) to run the command on every open, not
-  just on creation.
+The `command` recipe runs its `command` through a **login shell** (a no-op
+when no `command` is set). Put one-time setup in `onCreateWorktree`, and put
+recipes like `tmux` that take over the terminal last in `onOpen`:
+
+```json
+{
+  "hooks": {
+    "onCreateWorktree": [
+      { "type": "command", "command": "nvm use && yarn install && yarn build" }
+    ],
+    "onOpen": [
+      { "type": "vscode-color-config" },
+      { "type": "tmux" }
+    ]
+  }
+}
+```
+
+Now `grove some-branch` in that project creates the worktree, runs the command
+in it once, and only then opens tmux. Notes:
+
+- The command runs through a **login shell** (`bash -l` by default) so your
+  shell environment is sourced — that is what makes shell functions like `nvm
+  use` work in a non-interactive run. Override the interpreter with the
+  recipe's `shell` field (e.g. `"shell": "zsh"`).
+- It runs in the **worktree directory**, except for a `beforeCreateBranch`
+  entry — the worktree doesn't exist yet there, so it runs in the **project
+  root** (`$GROVE_PROJECT_DIR`) instead.
+- In `beforeCreateBranch`, a **non-zero exit aborts branch creation** — see
+  [Verifying a branch's ticket before creating it](#verifying-a-branchs-ticket-before-creating-it)
+  for a worked example.
 
 ### `cd`: move your shell into the worktree (opt-in)
 
-By default grove leaves your shell where it is. Add a `cd` recipe when you want
-`grove <branch>` to drop you inside the worktree it just opened:
+By default grove leaves your shell where it is. Add a `cd` recipe to `onOpen`
+when you want `grove <branch>` to drop you inside the worktree it just opened:
 
 ```json
-{ "recipes": [ { "type": "cd" } ] }
+{ "hooks": { "onOpen": [ { "type": "cd" } ] } }
 ```
 
 The catch: a binary can't change its parent shell's working directory. So the
@@ -190,7 +217,8 @@ echo 'source "$HOME/.local/share/grove/grove.fish"' >> ~/.config/fish/config.fis
 Building from source? Point `source` at `shell/grove.bash` (or `.fish`) inside
 your checkout instead. Without the sourced function the `cd` recipe warns once
 and does nothing — every other recipe still runs. Put `cd` before a `tmux`
-recipe so the destination is recorded before tmux takes over the terminal.
+entry in `onOpen` so the destination is recorded before tmux takes over the
+terminal.
 
 ### `webhook`: generic HTTP POST
 
@@ -232,9 +260,9 @@ your `PATH`. grove invokes it with the following environment:
 
 | Variable | Meaning |
 |----------|---------|
-| `GROVE_BRANCH` | the branch being opened |
+| `GROVE_BRANCH` | the branch being opened (or about to be created) |
 | `GROVE_NAME` | sanitized branch name (`/` and `:` → `-`) |
-| `GROVE_DIR` | absolute worktree path |
+| `GROVE_DIR` | absolute worktree path — in `beforeCreateBranch` this is the *planned* path; the worktree doesn't exist there yet |
 | `GROVE_COLOR` / `GROVE_FG` | branch color and a readable foreground |
 | `GROVE_PROJECT` / `GROVE_PROJECT_DIR` | project name and its directory |
 | `GROVE_BASE` | path to the bare `.base` repo |
@@ -243,6 +271,36 @@ your `PATH`. grove invokes it with the following environment:
 | `GROVE_CREATED` | `1` when the worktree was created on this invocation (vs. reopened) |
 | `GROVE_RECIPE_*` | the recipe entry's own fields (`GROVE_RECIPE_URL`, `GROVE_RECIPE_TOKEN`, `GROVE_RECIPE_LAYOUT`, `GROVE_RECIPE_COMMAND`, `GROVE_RECIPE_SHELL`, plus string `params` keys) |
 
+For a `beforeCreateBranch` entry, the external recipe's exit code is the gate:
+non-zero aborts branch creation, just like the built-in `command` recipe.
+
+### Verifying a branch's ticket before creating it
+
+`beforeCreateBranch` is a good place to catch a mistyped ticket number before
+it's baked into a branch name (and a PR title, and a changelog...). A `command`
+recipe pointed at a small script can look up the ticket, print its summary, and
+ask for confirmation — exiting non-zero aborts creation:
+
+```json
+{
+  "hooks": {
+    "beforeCreateBranch": [
+      { "type": "command", "command": "$GROVE_PROJECT_DIR/grove-hook-jira-check.sh" }
+    ]
+  }
+}
+```
+
+The script extracts a leading `PROJECT-NNN` from `$GROVE_BRANCH`, fetches it
+from your issue tracker, and prompts you to confirm the branch and ticket match
+before letting `git worktree add` run. Exit `0` for branches with no ticket
+prefix, and whenever stdin isn't a TTY (scripted/non-interactive branch
+creation), so the hook never blocks automation — only a human declining the
+prompt should abort. This is company/tracker-specific, so it's a
+`beforeCreateBranch` `command` recipe you write yourself rather than a grove
+built-in; see [Writing your own recipe](#writing-your-own-recipe) if you'd
+rather ship it as an external `grove-recipe-<type>` instead.
+
 ## Example: remote workflow
 
 With this `grove.json` and a reverse SSH tunnel from your workstation
@@ -250,10 +308,12 @@ With this `grove.json` and a reverse SSH tunnel from your workstation
 
 ```json
 {
-  "recipes": [
-    { "type": "vscode-color-config" },
-    { "type": "webhook", "url": "http://127.0.0.1:39788/open", "token": "$GROVE_WEBHOOK_TOKEN", "params": { "host": "devbox", "path": "$GROVE_DIR", "name": "$GROVE_NAME" } }
-  ]
+  "hooks": {
+    "onOpen": [
+      { "type": "vscode-color-config" },
+      { "type": "webhook", "url": "http://127.0.0.1:39788/open", "token": "$GROVE_WEBHOOK_TOKEN", "params": { "host": "devbox", "path": "$GROVE_DIR", "name": "$GROVE_NAME" } }
+    ]
+  }
 }
 ```
 
@@ -272,14 +332,18 @@ grove worktrees. This is handy for ordinary repos (e.g. `~/Code/slakkr`) that yo
 never cloned with `grove clone`.
 
 Put a **user-level** config at `$XDG_CONFIG_HOME/grove/config.json` (default
-`~/.config/grove/config.json`). It uses the same `recipes` shape as `grove.json`:
+`~/.config/grove/config.json`). It uses the same `hooks` shape as `grove.json`,
+though only the `onOpen` bucket applies — there's no worktree to create outside
+a grove project, so `beforeCreateBranch`/`onCreateWorktree` never run here:
 
 ```json
 {
-  "recipes": [
-    { "type": "vscode-color-config" },
-    { "type": "webhook", "url": "http://127.0.0.1:39788/open", "token": "$GROVE_WEBHOOK_TOKEN", "params": { "host": "devbox", "path": "$GROVE_DIR", "name": "$GROVE_NAME" } }
-  ]
+  "hooks": {
+    "onOpen": [
+      { "type": "vscode-color-config" },
+      { "type": "webhook", "url": "http://127.0.0.1:39788/open", "token": "$GROVE_WEBHOOK_TOKEN", "params": { "host": "devbox", "path": "$GROVE_DIR", "name": "$GROVE_NAME" } }
+    ]
+  }
 }
 ```
 
@@ -292,14 +356,14 @@ grove launch     # explicit; grove here is an alias
 grove launch ~/Code/slakkr   # launch a specific directory
 ```
 
-grove runs your user-level recipes against the directory, using the **folder name**
-(`slakkr`) for both the color and the webhook view name. No worktree is created,
-and your shell is not moved unless you add a
+grove runs your user-level `onOpen` hooks against the directory, using the
+**folder name** (`slakkr`) for both the color and the webhook view name. No
+worktree is created, and your shell is not moved unless you add a
 [`cd` recipe](#cd-move-your-shell-into-the-worktree-opt-in).
 
 Notes:
 
-- **No default recipe is assumed.** With no user config present, the launch is a
+- **No default hooks are assumed.** With no user config present, the launch is a
   hard error pointing you at the config path — grove never invents behavior.
 - The webhook sends whatever you put in `params` (with env substitution) to
   wsm, so the dedicated virtual-desktop view is handled on the workstation.
@@ -337,24 +401,33 @@ autocomplete and inline validation.
 {
   "$schema": "https://raw.githubusercontent.com/KurtPreston/grove/main/grove.schema.json",
   "copy": [".env"],
-  "recipes": [
-    { "type": "command", "command": "nvm use && yarn install && yarn build", "onOpen": false },
-    { "type": "vscode-color-config" },
-    { "type": "webhook", "url": "http://127.0.0.1:39788/open", "token": "$GROVE_WEBHOOK_TOKEN", "params": { "host": "devbox", "path": "$GROVE_DIR", "name": "$GROVE_NAME" } },
-    { "type": "tmux", "layout": "shell=,claude=claude" }
-  ]
+  "hooks": {
+    "beforeCreateBranch": [
+      { "type": "command", "command": "$GROVE_PROJECT_DIR/grove-hook-jira-check.sh" }
+    ],
+    "onCreateWorktree": [
+      { "type": "command", "command": "nvm use && yarn install && yarn build" }
+    ],
+    "onOpen": [
+      { "type": "vscode-color-config" },
+      { "type": "webhook", "url": "http://127.0.0.1:39788/open", "token": "$GROVE_WEBHOOK_TOKEN", "params": { "host": "devbox", "path": "$GROVE_DIR", "name": "$GROVE_NAME" } },
+      { "type": "tmux", "layout": "shell=,claude=claude" }
+    ]
+  }
 }
 ```
 
 | Key | Default | Description |
 |-----|---------|-------------|
 | `copy` | `[".env"]` | Untracked files copied from the default-branch worktree into new worktrees |
-| `recipes` | `[{ "type": "tmux" }]` | Ordered recipes run on open/switch (see [Recipes](#recipes)) |
+| `hooks` | `{ "onOpen": [{ "type": "tmux" }] }` | The three lifecycle buckets, each an ordered array of recipes (see [Hooks](#hooks)) |
 | `prune` | _(see below)_ | Tunes how `grove prune` decides which branches count as merged (see [Prune detection](#prune-detection)) |
 
-When `grove.json` is absent grove falls back to these defaults, so a project
-works before you write any config. A malformed file is non-fatal: grove warns
-and uses the defaults.
+When `grove.json` is absent, or its `hooks` key is omitted, grove falls back to
+these defaults, so a project works before you write any config. An explicit
+`hooks` object (even one that sets only one bucket) is respected exactly, with
+the other buckets empty — it does not merge with the defaults. A malformed file
+is non-fatal: grove warns and uses the defaults.
 
 ### Prune detection
 
@@ -395,8 +468,8 @@ move your shell; it is not user configuration.
 
 A separate **user-level** config at `~/.config/grove/config.json` (honoring
 `$XDG_CONFIG_HOME`) drives `grove launch` for folders that are not grove
-projects. It reuses the `recipes` shape above but has **no defaults** — see
-[Launching any folder](#launching-any-folder).
+projects. It reuses the `hooks` shape above (only `onOpen` applies) but has
+**no defaults** — see [Launching any folder](#launching-any-folder).
 
 ## tmux theming
 
