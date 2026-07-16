@@ -30,6 +30,7 @@ import (
 	"grove/internal/project"
 	"grove/internal/recipe"
 	"grove/internal/recipe/builtin" // register built-in recipes + layout helpers
+	"grove/internal/selfupdate"
 	"grove/internal/tmux"
 	"grove/internal/ui"
 )
@@ -78,6 +79,8 @@ func main() {
 		cmdLaunch(args[1:])
 	case "version", "--version", "-v":
 		cmdVersion()
+	case "update":
+		cmdUpdate(args[1:])
 	case "help", "-h", "--help":
 		usage()
 	case "":
@@ -582,6 +585,39 @@ func cmdVersion() {
 	fmt.Printf("grove %s (commit %s, built %s)\n", version, commit, date)
 }
 
+// cmdUpdate replaces the running grove binary in place with the latest published
+// release (see internal/selfupdate). --force reinstalls even when already
+// current; GROVE_VERSION / GROVE_REPO mirror install.sh to pin the tag or source.
+func cmdUpdate(args []string) {
+	_, force := popForce(args)
+	res, err := selfupdate.Run(selfupdate.Options{
+		CurrentVersion: version,
+		Force:          force,
+	})
+	if err != nil {
+		ui.Die(err.Error())
+	}
+	if res.UpToDate {
+		ui.Info(fmt.Sprintf("grove is already up to date (%s).", displayVer(res.ToVersion)))
+		return
+	}
+	ui.Info(fmt.Sprintf("Updated grove %s -> %s (%s).",
+		displayVer(res.FromVersion), displayVer(res.ToVersion), res.BinaryPath))
+	if len(res.ShellUpdated) > 0 {
+		ui.Info("Refreshed shell integration: " + strings.Join(res.ShellUpdated, ", ") + ".")
+	}
+}
+
+// displayVer trims a leading "v" so version output reads consistently whether it
+// came from the baked-in build string ("0.3.2") or a release tag ("v0.3.3").
+func displayVer(v string) string {
+	v = strings.TrimSpace(v)
+	if v == "" {
+		return "unknown"
+	}
+	return strings.TrimPrefix(v, "v")
+}
+
 // cmdLaunch: grove launch [DIR] / grove here. Runs the user-level onOpen hooks
 // (~/.config/grove/config.json) against DIR (or cwd) without requiring a grove
 // project or creating a worktree. Used directly and as the fallback for bare
@@ -885,6 +921,7 @@ Usage:
   grove color BRANCH             Print the deterministic color for BRANCH
   grove launch | here [DIR]      Run user-level recipes for DIR (or cwd) without a worktree
   grove version                  Print the grove version and build metadata
+  grove update [--force]         Update grove in place to the latest published release
   grove help                     Show this help
 
 Pass --force to open/switch to re-run the afterFirstOpen bucket (one-time setup)

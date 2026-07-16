@@ -51,6 +51,23 @@ make install          # builds + installs to ~/.local/bin
 > [`cd` recipe](#cd-move-your-shell-into-the-worktree-opt-in). Everything else
 > works without it.
 
+### Updating
+
+However you installed it, grove can update itself in place:
+
+```sh
+grove update           # fetch the latest release and replace the running binary
+grove update --force   # reinstall even if already on the latest version
+```
+
+`grove update` resolves the latest release from GitHub, downloads the archive for
+your OS/arch, verifies it against the release checksums, and atomically swaps the
+running binary. If grove's shell-integration scripts are already installed (under
+`$XDG_DATA_HOME/grove`, default `~/.local/share/grove`), they're refreshed too.
+Set `GROVE_VERSION=vX.Y.Z` to pin a specific release (e.g. to downgrade) or
+`GROVE_REPO=owner/repo` to update from a fork — the same knobs
+[`install.sh`](install.sh) honors.
+
 ## Usage
 
 | Command | Description |
@@ -66,6 +83,7 @@ make install          # builds + installs to ~/.local/bin
 | `grove rm BRANCH [--force]` | Remove a single worktree (keeps the branch ref); `--force` discards local changes |
 | `grove color BRANCH` | Print the deterministic color for a branch |
 | `grove launch` / `here [DIR]` | Run the user-level recipes for `DIR` (or cwd) without a worktree (see [Launching any folder](#launching-any-folder)) |
+| `grove update [--force]` | Update grove in place to the latest published release (downloads, verifies, and swaps the binary); `--force` reinstalls even when already current (see [Updating](#updating)) |
 | `grove help` | Show help |
 
 `grove path` and `grove ls --porcelain` write only their result to stdout (all
