@@ -18,21 +18,27 @@
     "hooks": {
       "type": "object",
       "additionalProperties": false,
-      "description": "Recipes grouped by when they run. Naming rule: a \"before*\" bucket is a gate that runs first and can abort by exiting non-zero; an \"on*\" bucket is a reaction to an event that already happened (failures only warn).",
+      "description": "Recipes grouped by when they run, in this order: beforeCreateBranch (a gate that can abort by exiting non-zero), then onOpen (every open), then afterFirstOpen (once, after a freshly created worktree's first open). Only beforeCreateBranch aborts on failure; the others just warn.",
       "properties": {
         "beforeCreateBranch": {
           "type": "array",
           "description": "Runs only when a brand-new branch (neither local nor on origin) is about to be created, before the worktree or branch exist. A non-zero exit aborts creation entirely. Not run by `grove path`, and not run when reusing an existing local/origin branch.",
           "items": { "$ref": "#/$defs/recipe" }
         },
-        "onCreateWorktree": {
-          "type": "array",
-          "description": "Runs once, when a worktree is freshly created - including checking out an existing local/origin branch into a new worktree, not just brand-new branches. Also re-run by `grove open --force` on an existing worktree. Failures warn but don't abort. The bucket for one-time setup (e.g. `yarn install`).",
-          "items": { "$ref": "#/$defs/recipe" }
-        },
         "onOpen": {
           "type": "array",
-          "description": "Runs on every open: creating, reopening, and a plain-folder `grove launch`/`here`. Failures warn but don't abort.",
+          "description": "Runs on every open: creating, reopening, and a plain-folder `grove launch`/`here`. Runs before afterFirstOpen, so an editor-launch recipe isn't blocked behind one-time setup. Failures warn but don't abort.",
+          "items": { "$ref": "#/$defs/recipe" }
+        },
+        "afterFirstOpen": {
+          "type": "array",
+          "description": "Runs once, after the first open of a freshly created worktree - including checking out an existing local/origin branch into a new worktree, not just brand-new branches. Runs after onOpen, and is re-run by `grove open --force` on an existing worktree. Failures warn but don't abort. The bucket for one-time setup (e.g. `yarn install`).",
+          "items": { "$ref": "#/$defs/recipe" }
+        },
+        "onCreateWorktree": {
+          "type": "array",
+          "deprecated": true,
+          "description": "Deprecated: renamed to afterFirstOpen (which now runs after onOpen, not before it). Still accepted as an alias - grove folds it into afterFirstOpen with a warning - but update your config to afterFirstOpen.",
           "items": { "$ref": "#/$defs/recipe" }
         }
       }

@@ -106,8 +106,8 @@ func runOne(ctx Context, rc config.RecipeConfig) error {
 }
 
 // Run executes each configured recipe in order, warning (but not aborting) on
-// failure - including an unknown type. Used for the onCreateWorktree and
-// onOpen buckets, which react to something that has already happened.
+// failure - including an unknown type. Used for the onOpen and afterFirstOpen
+// buckets, which react to something that has already happened.
 // Entries without a type are skipped (config.Load already warned).
 func Run(recipes []config.RecipeConfig, ctx Context) {
 	for _, rc := range recipes {

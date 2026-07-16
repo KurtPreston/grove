@@ -57,7 +57,7 @@ make install          # builds + installs to ~/.local/bin
 |---------|-------------|
 | `grove clone GIT_URL [FOLDER]` | Clone a repo as a bare `.base` plus a worktree for the default branch under `FOLDER` in the current directory, and seed a starter (commented) `grove.jsonc` |
 | `grove BRANCH [--from REF]` | Switch to (or create) BRANCH's worktree and run the hooks in `grove.json`. When BRANCH is new, `beforeCreateBranch` hooks can abort creation, and `--from REF` bases it off REF (see [Choosing the base branch](#choosing-the-base-branch-for-new-branches)) |
-| `grove open [BRANCH] [TYPES] [--force]` | Open BRANCH (or the current worktree's branch if omitted/`.`); `TYPES` (comma-separated) filters the configured hooks to those recipe types; `--force` re-runs the `onCreateWorktree` bucket |
+| `grove open [BRANCH] [TYPES] [--force]` | Open BRANCH (or the current worktree's branch if omitted/`.`); `TYPES` (comma-separated) filters the configured hooks to those recipe types; `--force` re-runs the `afterFirstOpen` bucket |
 | `grove switch [BRANCH]` | Like a bare BRANCH; with no branch and `fzf` installed, opens a picker |
 | `grove path BRANCH` | Resolve (creating if needed) BRANCH's worktree and print its absolute path to stdout |
 | `grove tmux` | Attach the project's tmux session, building a window for every worktree |
@@ -125,22 +125,31 @@ Built-in recipes:
 
 ### The three hooks buckets
 
-The naming rule: a **`before*`** bucket is a gate that runs first and can
-**abort** by exiting non-zero; an **`on*`** bucket is a reaction to something
-that already happened, where a failure only warns and grove continues.
+They run in a fixed order — **`beforeCreateBranch`** → **`onOpen`** →
+**`afterFirstOpen`** — and only `beforeCreateBranch` can **abort** (by exiting
+non-zero); the other two only warn on failure and grove continues.
 
 | Bucket | Runs | On failure |
 |--------|------|------------|
 | `beforeCreateBranch` | Only for a **brand-new branch** (one that exists neither locally nor on `origin`), before it's created | **Aborts** — nothing is created |
-| `onCreateWorktree` | Once, when a **worktree is freshly created** — this includes checking out an *existing* local/origin branch into a new worktree, not just brand-new branches. Also re-run by `grove open --force` on an existing worktree | Warns, continues |
 | `onOpen` | On **every open**: creating, reopening, or a plain-folder `grove launch`/`here` | Warns, continues |
+| `afterFirstOpen` | Once, **after the first open** of a **freshly created worktree** — this includes checking out an *existing* local/origin branch into a new worktree, not just brand-new branches. Runs after `onOpen`; also re-run by `grove open --force` on an existing worktree | Warns, continues |
 
-`onCreateWorktree` is the old create-only (`"onOpen": false`) behavior; `onOpen`
-is the old always-run default. `beforeCreateBranch` is new: it's the place for
-a script that validates the branch itself — e.g. checking its name against a
-ticket — before anything exists that would need cleaning up if it's wrong. It
-is **not** run by `grove path` (used by scripts/tooling) and is skipped when
-reusing an existing branch, since there's nothing left to gate.
+`afterFirstOpen` is the old create-only (`"onOpen": false`) behavior; `onOpen`
+is the old always-run default. Running `onOpen` **first** means a non-blocking
+editor launch (e.g. `cursor $GROVE_DIR`) opens immediately, and the one-time
+setup runs afterward rather than gating the window behind a long build.
+`beforeCreateBranch` is the place for a script that validates the branch itself
+— e.g. checking its name against a ticket — before anything exists that would
+need cleaning up if it's wrong. It is **not** run by `grove path` (used by
+scripts/tooling) and is skipped when reusing an existing branch, since there's
+nothing left to gate.
+
+> **Renamed:** `afterFirstOpen` was previously called `onCreateWorktree` and ran
+> *before* `onOpen`. The old key is still accepted as a deprecated alias (grove
+> folds it into `afterFirstOpen` with a warning), but note the order flipped:
+> update your config and move any terminal-takeover recipe accordingly (see the
+> tmux note below).
 
 ```json
 {
@@ -148,12 +157,12 @@ reusing an existing branch, since there's nothing left to gate.
     "beforeCreateBranch": [
       { "type": "command", "command": "$GROVE_PROJECT_DIR/grove-hook-jira-check.sh" }
     ],
-    "onCreateWorktree": [
-      { "type": "command", "command": "nvm use && yarn install && yarn build" }
-    ],
     "onOpen": [
       { "type": "vscode-color-config" },
-      { "type": "tmux" }
+      { "type": "command", "command": "cursor $GROVE_DIR" }
+    ],
+    "afterFirstOpen": [
+      { "type": "command", "command": "nvm use && yarn install && yarn build" }
     ]
   }
 }
@@ -162,25 +171,36 @@ reusing an existing branch, since there's nothing left to gate.
 ### `command`: run a shell command (e.g. per-project setup, or a branch-name gate)
 
 The `command` recipe runs its `command` through a **login shell** (a no-op
-when no `command` is set). Put one-time setup in `onCreateWorktree`, and put
-recipes like `tmux` that take over the terminal last in `onOpen`:
+when no `command` is set). Put one-time setup in `afterFirstOpen`; because it
+runs after `onOpen`, a non-blocking editor launch opens first and the setup
+follows:
 
 ```json
 {
   "hooks": {
-    "onCreateWorktree": [
-      { "type": "command", "command": "nvm use && yarn install && yarn build" }
-    ],
     "onOpen": [
       { "type": "vscode-color-config" },
-      { "type": "tmux" }
+      { "type": "command", "command": "cursor $GROVE_DIR" }
+    ],
+    "afterFirstOpen": [
+      { "type": "command", "command": "nvm use && yarn install && yarn build" }
     ]
   }
 }
 ```
 
-Now `grove some-branch` in that project creates the worktree, runs the command
-in it once, and only then opens tmux. Notes:
+Now `grove some-branch` in that project creates the worktree, opens the editor,
+and only then runs the one-time setup command in it.
+
+> **tmux (and other terminal-takeover recipes):** the `tmux` recipe calls
+> `attach`, which hands the terminal to tmux and **blocks grove until you
+> detach**. Since `onOpen` now runs before `afterFirstOpen`, a `tmux` recipe in
+> `onOpen` would defer `afterFirstOpen` until you detach. For a tmux workflow,
+> run one-time setup as a pane command in the tmux `layout` (e.g. `"layout":
+> "setup=nvm use && yarn install,shell=,claude=claude"`) rather than in
+> `afterFirstOpen`.
+
+Notes:
 
 - The command runs through a **login shell** (`bash -l` by default) so your
   shell environment is sourced — that is what makes shell functions like `nvm
@@ -334,7 +354,7 @@ never cloned with `grove clone`.
 Put a **user-level** config at `$XDG_CONFIG_HOME/grove/config.json` (default
 `~/.config/grove/config.json`). It uses the same `hooks` shape as `grove.json`,
 though only the `onOpen` bucket applies — there's no worktree to create outside
-a grove project, so `beforeCreateBranch`/`onCreateWorktree` never run here:
+a grove project, so `beforeCreateBranch`/`afterFirstOpen` never run here:
 
 ```json
 {
@@ -405,13 +425,12 @@ autocomplete and inline validation.
     "beforeCreateBranch": [
       { "type": "command", "command": "$GROVE_PROJECT_DIR/grove-hook-jira-check.sh" }
     ],
-    "onCreateWorktree": [
-      { "type": "command", "command": "nvm use && yarn install && yarn build" }
-    ],
     "onOpen": [
       { "type": "vscode-color-config" },
-      { "type": "webhook", "url": "http://127.0.0.1:39788/open", "token": "$GROVE_WEBHOOK_TOKEN", "params": { "host": "devbox", "path": "$GROVE_DIR", "name": "$GROVE_NAME" } },
-      { "type": "tmux", "layout": "shell=,claude=claude" }
+      { "type": "webhook", "url": "http://127.0.0.1:39788/open", "token": "$GROVE_WEBHOOK_TOKEN", "params": { "host": "devbox", "path": "$GROVE_DIR", "name": "$GROVE_NAME" } }
+    ],
+    "afterFirstOpen": [
+      { "type": "command", "command": "nvm use && yarn install && yarn build" }
     ]
   }
 }

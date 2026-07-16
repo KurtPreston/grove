@@ -64,7 +64,7 @@ func TestSeedWritesParseableJSONC(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load of seeded config: %v", err)
 	}
-	if cfg.Hooks == nil || len(cfg.Hooks.BeforeCreateBranch)+len(cfg.Hooks.OnCreateWorktree)+len(cfg.Hooks.OnOpen) == 0 {
+	if cfg.Hooks == nil || len(cfg.Hooks.BeforeCreateBranch)+len(cfg.Hooks.OnOpen)+len(cfg.Hooks.AfterFirstOpen) == 0 {
 		t.Fatal("seeded config parsed to zero hooks")
 	}
 
@@ -98,8 +98,8 @@ func TestLoadDefaultsHooksWhenOmitted(t *testing.T) {
 	if cfg.Hooks == nil || len(cfg.Hooks.OnOpen) != 1 || cfg.Hooks.OnOpen[0].Type != "tmux" {
 		t.Errorf("expected default tmux-only onOpen hook, got %#v", cfg.Hooks)
 	}
-	if len(cfg.Hooks.BeforeCreateBranch) != 0 || len(cfg.Hooks.OnCreateWorktree) != 0 {
-		t.Errorf("expected empty beforeCreateBranch/onCreateWorktree by default, got %#v", cfg.Hooks)
+	if len(cfg.Hooks.BeforeCreateBranch) != 0 || len(cfg.Hooks.AfterFirstOpen) != 0 {
+		t.Errorf("expected empty beforeCreateBranch/afterFirstOpen by default, got %#v", cfg.Hooks)
 	}
 }
 
@@ -124,6 +124,44 @@ func TestLoadPartialHooksDoesNotMergeDefaults(t *testing.T) {
 	}
 	if len(cfg.Hooks.OnOpen) != 0 {
 		t.Errorf("onOpen = %#v, want empty (must not inherit the default tmux recipe)", cfg.Hooks.OnOpen)
+	}
+}
+
+// TestLoadMigratesDeprecatedOnCreateWorktree verifies the pre-rename
+// "onCreateWorktree" key is still honored: Load folds it into AfterFirstOpen and
+// clears the legacy bucket.
+func TestLoadMigratesDeprecatedOnCreateWorktree(t *testing.T) {
+	dir := t.TempDir()
+	src := `{"hooks": {"onCreateWorktree": [{"type": "command", "command": "setup.sh"}]}}`
+	if err := os.WriteFile(filepath.Join(dir, "grove.json"), []byte(src), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(dir)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if len(cfg.AfterFirstOpen()) != 1 || cfg.AfterFirstOpen()[0].Command != "setup.sh" {
+		t.Errorf("afterFirstOpen = %#v, want the migrated onCreateWorktree entry", cfg.AfterFirstOpen())
+	}
+	if len(cfg.Hooks.OnCreateWorktreeLegacy) != 0 {
+		t.Errorf("legacy bucket should be cleared after migration, got %#v", cfg.Hooks.OnCreateWorktreeLegacy)
+	}
+}
+
+// TestLoadPrefersAfterFirstOpenOverDeprecatedAlias verifies that when both the
+// new key and the deprecated alias are set, afterFirstOpen wins.
+func TestLoadPrefersAfterFirstOpenOverDeprecatedAlias(t *testing.T) {
+	dir := t.TempDir()
+	src := `{"hooks": {"afterFirstOpen": [{"type": "command", "command": "new.sh"}], "onCreateWorktree": [{"type": "command", "command": "old.sh"}]}}`
+	if err := os.WriteFile(filepath.Join(dir, "grove.json"), []byte(src), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(dir)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if len(cfg.AfterFirstOpen()) != 1 || cfg.AfterFirstOpen()[0].Command != "new.sh" {
+		t.Errorf("afterFirstOpen = %#v, want the explicit new.sh entry (alias must not win)", cfg.AfterFirstOpen())
 	}
 }
 

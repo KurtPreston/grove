@@ -16,13 +16,8 @@
     //   { "type": "command", "command": "$GROVE_PROJECT_DIR/grove-hook-jira-check.sh" }
     // ],
 
-    // Runs once, when a worktree is freshly created - the place for one-time
-    // bootstrap commands:
-    // "onCreateWorktree": [
-    //   { "type": "command", "command": "npm install" }
-    // ],
-
     // Runs every time you open a branch (create, reopen, or plain launch).
+    // Runs before afterFirstOpen, so your editor opens before one-time setup.
     "onOpen": [
       // Generate a custom branch color, and write it to .vscode/settings.json for VSCode/Cursor themeing:
       { "type": "vscode-color-config" },
@@ -40,6 +35,13 @@
       // Ensure a tmux session with one window per worktree, then attach.
       // { "type": "tmux", "layout": "shell=,claude=claude" }
     ],
+
+    // Runs once, after the first open of a freshly created worktree - the place
+    // for one-time bootstrap commands. It runs after onOpen, so a non-blocking
+    // editor launch (e.g. cursor) opens first and the build follows:
+    // "afterFirstOpen": [
+    //   { "type": "command", "command": "npm install" }
+    // ],
   },
 
   // Tune `grove prune` merge detection. Squash/rebase detection is on by default;

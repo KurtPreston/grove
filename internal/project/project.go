@@ -268,7 +268,7 @@ func setUpstream(base, branch string) {
 // copyFiles are untracked files copied from the default-branch worktree into
 // freshly created ones. The returned bool reports whether the worktree was
 // created on this call (vs. reused), so callers can drive one-time
-// onCreateWorktree behavior.
+// afterFirstOpen behavior.
 //
 // pickBase chooses which branch a brand-new branch is based off. It is called
 // only when the branch exists neither locally nor on origin — reusing an

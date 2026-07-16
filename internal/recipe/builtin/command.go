@@ -19,7 +19,7 @@ const DefaultCommandShell = "bash"
 // "command" entry lives in decides when it runs (see config.Hooks); this
 // handler is unconditional beyond the no-op when no command is configured. A
 // common use is one-time, per-project setup — e.g. `nvm use && yarn install &&
-// yarn build` in the onCreateWorktree bucket, so it only runs once.
+// yarn build` in the afterFirstOpen bucket, so it only runs once.
 //
 // The command runs through a login shell so the user's environment (nvm, asdf,
 // rbenv, …) is sourced; that is what lets shell-function tools like `nvm use`

@@ -122,14 +122,14 @@ func cmdClone(args []string) {
 	}
 	cfg := loadCfg(p)
 	ctx := buildContext(p, branch, dir, true)
-	recipe.Run(cfg.OnCreateWorktree(), ctx)
 	recipe.Run(cfg.OnOpen(), ctx)
+	recipe.Run(cfg.AfterFirstOpen(), ctx)
 }
 
 // cmdOpen: grove open [BRANCH] [TYPES] [--force]. BRANCH omitted or "." infers
 // the current worktree's branch; TYPES (a comma-separated list of recipe
 // types) filters grove.json's hooks to only those types. --force re-runs the
-// onCreateWorktree bucket (one-time setup) on an existing worktree.
+// afterFirstOpen bucket (one-time setup) on an existing worktree.
 func cmdOpen(args []string) {
 	p := mustResolve()
 	args, force := popForce(args)
@@ -192,10 +192,10 @@ func doOpen(p *project.Project, branch, filter, from string, force bool) {
 		ui.Die(err.Error())
 	}
 	ctx := buildContext(p, branch, dir, created)
-	if created || force {
-		recipe.Run(filterRecipes(cfg.OnCreateWorktree(), filter), ctx)
-	}
 	recipe.Run(filterRecipes(cfg.OnOpen(), filter), ctx)
+	if created || force {
+		recipe.Run(filterRecipes(cfg.AfterFirstOpen(), filter), ctx)
+	}
 }
 
 // filterRecipes restricts recipes to those whose type appears in the
@@ -306,8 +306,8 @@ func tmuxLayout(cfg config.Config) string {
 	}
 	for _, bucket := range [][]config.RecipeConfig{
 		cfg.Hooks.BeforeCreateBranch,
-		cfg.Hooks.OnCreateWorktree,
 		cfg.Hooks.OnOpen,
+		cfg.Hooks.AfterFirstOpen,
 	} {
 		for _, r := range bucket {
 			if r.Type == "tmux" {
@@ -887,7 +887,7 @@ Usage:
   grove version                  Print the grove version and build metadata
   grove help                     Show this help
 
-Pass --force to open/switch to re-run the onCreateWorktree bucket (one-time setup)
+Pass --force to open/switch to re-run the afterFirstOpen bucket (one-time setup)
 on an existing worktree.
 
 When a branch doesn't exist yet, grove creates it. Before creating it, grove runs
@@ -906,8 +906,8 @@ at the project root (beside .base), validated by grove.schema.json. It declares 
 "hooks" object with three buckets, each an ordered array of recipes (a "type" plus
 that type's settings):
   beforeCreateBranch  gates a brand-new branch; a non-zero exit aborts creation
-  onCreateWorktree    runs once, when a worktree is freshly created (one-time setup)
   onOpen              runs on every open: creating, reopening, or a plain launch
+  afterFirstOpen      runs once, after the first open of a fresh worktree (one-time setup)
 Built-in recipe types: tmux, vscode-color-config, webhook, command, cd. Any other
 type resolves to grove-recipe-<type> on PATH (settings exported as GROVE_RECIPE_*).
 The top-level "copy" array tunes which files are copied. The optional "cd" recipe

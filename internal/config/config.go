@@ -44,9 +44,10 @@ type Config struct {
 }
 
 // Hooks groups the recipes grove runs at each point in a branch's lifecycle.
-// Naming rule: a "before*" bucket is a gate that runs first and can abort by
-// returning a non-zero exit; an "on*" bucket is a reaction to an event that
-// already happened and never aborts (failures just warn).
+// They run in this order: beforeCreateBranch (a gate that can abort by exiting
+// non-zero), then onOpen (every open), then afterFirstOpen (once, after a
+// freshly created worktree's first open). Only beforeCreateBranch aborts on
+// failure; the others just warn.
 type Hooks struct {
 	// BeforeCreateBranch runs only when a brand-new branch (one that exists
 	// neither locally nor on origin) is about to be created, before the worktree
@@ -54,15 +55,21 @@ type Hooks struct {
 	// nothing is created. Not run for `grove path`, and not run when reusing an
 	// existing local/origin branch (only truly new branches are gated).
 	BeforeCreateBranch []RecipeConfig `json:"beforeCreateBranch,omitempty"`
-	// OnCreateWorktree runs once, when a worktree is freshly created - which
-	// includes checking out an existing local/origin branch into a new
-	// worktree, not just brand-new branches. Also runs on `grove open --force`
-	// against an existing worktree. Failures warn but don't abort. This is the
-	// bucket for one-time setup (e.g. `yarn install`).
-	OnCreateWorktree []RecipeConfig `json:"onCreateWorktree,omitempty"`
 	// OnOpen runs on every open: creating, reopening, and a plain-folder
-	// `grove launch`/`here`. Failures warn but don't abort.
+	// `grove launch`/`here`. It runs before AfterFirstOpen so an editor-launch
+	// recipe (e.g. `cursor $GROVE_DIR`) isn't blocked behind one-time setup.
+	// Failures warn but don't abort.
 	OnOpen []RecipeConfig `json:"onOpen,omitempty"`
+	// AfterFirstOpen runs once, after the first open of a freshly created
+	// worktree - which includes checking out an existing local/origin branch
+	// into a new worktree, not just brand-new branches. It runs after OnOpen and
+	// is re-run by `grove open --force` on an existing worktree. Failures warn
+	// but don't abort. This is the bucket for one-time setup (e.g. `yarn install`).
+	AfterFirstOpen []RecipeConfig `json:"afterFirstOpen,omitempty"`
+	// OnCreateWorktreeLegacy is the deprecated pre-rename name for
+	// AfterFirstOpen, accepted so existing configs keep working. migrateLegacy
+	// folds it into AfterFirstOpen (warning once); do not read it directly.
+	OnCreateWorktreeLegacy []RecipeConfig `json:"onCreateWorktree,omitempty"`
 }
 
 // PruneConfig holds the settings `grove prune` uses to decide which worktrees'
@@ -119,13 +126,13 @@ func (c Config) BeforeCreateBranch() []RecipeConfig {
 	return c.Hooks.BeforeCreateBranch
 }
 
-// OnCreateWorktree returns the recipes run once when a worktree is freshly
-// created, or nil when Hooks is unset.
-func (c Config) OnCreateWorktree() []RecipeConfig {
+// AfterFirstOpen returns the recipes run once, after the first open of a freshly
+// created worktree, or nil when Hooks is unset.
+func (c Config) AfterFirstOpen() []RecipeConfig {
 	if c.Hooks == nil {
 		return nil
 	}
-	return c.Hooks.OnCreateWorktree
+	return c.Hooks.AfterFirstOpen
 }
 
 // OnOpen returns the recipes run on every open, or nil when Hooks is unset.
@@ -134,6 +141,22 @@ func (c Config) OnOpen() []RecipeConfig {
 		return nil
 	}
 	return c.Hooks.OnOpen
+}
+
+// migrateLegacy folds the deprecated "onCreateWorktree" bucket into
+// AfterFirstOpen (its current name) when the new key is unset, so pre-rename
+// configs keep working. It warns so the config gets updated.
+func (h *Hooks) migrateLegacy() {
+	if len(h.OnCreateWorktreeLegacy) == 0 {
+		return
+	}
+	if len(h.AfterFirstOpen) == 0 {
+		h.AfterFirstOpen = h.OnCreateWorktreeLegacy
+		ui.Warn(`grove.json: "onCreateWorktree" is deprecated; rename it to "afterFirstOpen" (it now runs after onOpen).`)
+	} else {
+		ui.Warn(`grove.json: both "afterFirstOpen" and the deprecated "onCreateWorktree" are set; ignoring "onCreateWorktree".`)
+	}
+	h.OnCreateWorktreeLegacy = nil
 }
 
 // RecipeConfig is one entry in a hooks bucket: a recipe Type plus the
@@ -197,6 +220,7 @@ func Load(projectDir string) (Config, error) {
 	if cfg.Hooks == nil {
 		cfg.Hooks = Defaults().Hooks
 	}
+	cfg.Hooks.migrateLegacy()
 	cfg.validate()
 	return cfg, nil
 }
@@ -266,6 +290,9 @@ func LoadUser() (cfg Config, found bool, err error) {
 	if err := json.Unmarshal(b, &cfg); err != nil {
 		return Config{}, true, err
 	}
+	if cfg.Hooks != nil {
+		cfg.Hooks.migrateLegacy()
+	}
 	cfg.validate()
 	return cfg, true, nil
 }
@@ -294,8 +321,8 @@ func (c Config) validate() {
 		recipes []RecipeConfig
 	}{
 		{"beforeCreateBranch", c.Hooks.BeforeCreateBranch},
-		{"onCreateWorktree", c.Hooks.OnCreateWorktree},
 		{"onOpen", c.Hooks.OnOpen},
+		{"afterFirstOpen", c.Hooks.AfterFirstOpen},
 	} {
 		for i, r := range bucket.recipes {
 			if r.Type == "" {
