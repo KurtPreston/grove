@@ -103,23 +103,25 @@ func TestPruneReason(t *testing.T) {
 		cwd         string
 		cfg         config.Config
 		forgeMerged map[string]bool
+		partial     bool
 		want        string
 	}{
-		{"regular merge", wt("feat-merged"), otherCwd, std, nil, "merged"},
-		{"squash merge", wt("feat-squash"), otherCwd, std, nil, "squashed"},
-		{"gone upstream", wt("feat-gone"), otherCwd, std, nil, "gone"},
-		{"upstream present kept", wt("feat-upstream"), otherCwd, std, nil, ""},
-		{"open unmerged kept", wt("feat-open"), otherCwd, std, nil, ""},
-		{"forge merged", wt("feat-open"), otherCwd, std, map[string]bool{"feat-open": true}, "forge"},
-		{"squash detection disabled", wt("feat-squash"), otherCwd, squashOff(), nil, ""},
-		{"default branch kept", wt("main"), otherCwd, std, nil, ""},
-		{"current dir kept", project.Worktree{Path: otherCwd, Branch: "feat-merged"}, otherCwd, std, nil, ""},
-		{"bare kept", project.Worktree{Path: "/wt/bare", Bare: true}, otherCwd, std, nil, ""},
-		{"no branch kept", project.Worktree{Path: "/wt/detached"}, otherCwd, std, nil, ""},
+		{"regular merge", wt("feat-merged"), otherCwd, std, nil, false, "merged"},
+		{"squash merge", wt("feat-squash"), otherCwd, std, nil, false, "squashed"},
+		{"gone upstream", wt("feat-gone"), otherCwd, std, nil, false, "gone"},
+		{"upstream present kept", wt("feat-upstream"), otherCwd, std, nil, false, ""},
+		{"open unmerged kept", wt("feat-open"), otherCwd, std, nil, false, ""},
+		{"forge merged", wt("feat-open"), otherCwd, std, map[string]bool{"feat-open": true}, false, "forge"},
+		{"squash detection disabled", wt("feat-squash"), otherCwd, squashOff(), nil, false, ""},
+		{"partial clone skips squash detection", wt("feat-squash"), otherCwd, std, nil, true, ""},
+		{"default branch kept", wt("main"), otherCwd, std, nil, false, ""},
+		{"current dir kept", project.Worktree{Path: otherCwd, Branch: "feat-merged"}, otherCwd, std, nil, false, ""},
+		{"bare kept", project.Worktree{Path: "/wt/bare", Bare: true}, otherCwd, std, nil, false, ""},
+		{"no branch kept", project.Worktree{Path: "/wt/detached"}, otherCwd, std, nil, false, ""},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			got := pruneReason(p, tc.w, def, tc.cwd, tc.cfg, tc.forgeMerged)
+			got := pruneReason(p, tc.w, def, tc.cwd, tc.cfg, tc.forgeMerged, tc.partial)
 			if got != tc.want {
 				t.Errorf("pruneReason(%q) = %q, want %q", tc.w.Branch, got, tc.want)
 			}

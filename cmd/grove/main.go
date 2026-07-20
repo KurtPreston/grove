@@ -384,6 +384,11 @@ func cmdPrune(args []string) {
 	ui.Info("Fetching and pruning remotes...")
 	p.Prune()
 
+	partial := p.IsPartialClone()
+	if cfg.SquashDetectionEnabled() && partial {
+		ui.Warn("Partial (blobless) clone detected; skipping squash/rebase-merge detection (ancestry-only) to avoid on-demand fetches.")
+	}
+
 	wts, _ := p.Worktrees()
 	cwd := mustGetwd()
 	var forgeMerged map[string]bool
@@ -397,7 +402,7 @@ func cmdPrune(args []string) {
 	var candidates []cand
 	dirtyCount := 0
 	for _, w := range wts {
-		if r := pruneReason(p, w, def, cwd, cfg, forgeMerged); r != "" {
+		if r := pruneReason(p, w, def, cwd, cfg, forgeMerged, partial); r != "" {
 			dirty := !p.WorktreeClean(w.Path)
 			if dirty {
 				dirtyCount++
@@ -453,7 +458,7 @@ func cmdPrune(args []string) {
 // pruneReason returns why a worktree is a prune candidate ("merged", "squashed",
 // or "gone"), or "" when it should be kept. A worktree is never a candidate when
 // it is bare, has no branch, is the default branch, or is the current directory.
-func pruneReason(p *project.Project, w project.Worktree, def, cwd string, cfg config.Config, forgeMerged map[string]bool) string {
+func pruneReason(p *project.Project, w project.Worktree, def, cwd string, cfg config.Config, forgeMerged map[string]bool, partial bool) string {
 	if w.Path == "" || w.Branch == "" || w.Bare {
 		return ""
 	}
@@ -465,8 +470,9 @@ func pruneReason(p *project.Project, w project.Worktree, def, cwd string, cfg co
 		return "merged"
 	}
 	// Squash/rebase merges rewrite history, so ancestry misses them; fall back
-	// to patch-equivalence against origin/default.
-	if cfg.SquashDetectionEnabled() && p.BranchSquashMerged(w.Branch, into) {
+	// to patch-equivalence against origin/default. Skip on partial clones, where
+	// the patch-id diff would lazy-fetch blobs from the remote.
+	if cfg.SquashDetectionEnabled() && !partial && p.BranchSquashMerged(w.Branch, into) {
 		return "squashed"
 	}
 	// Authoritative merged-PR state from the forge, when configured.

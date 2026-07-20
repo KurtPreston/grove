@@ -6,6 +6,7 @@ package project
 
 import (
 	"bufio"
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -13,7 +14,9 @@ import (
 	"os/exec"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
+	"time"
 
 	"grove/internal/ui"
 )
@@ -31,9 +34,32 @@ func (p *Project) Name() string { return filepath.Base(p.Dir) }
 // git helpers (exported so the CLI layer can reuse them without re-shelling)
 // ---------------------------------------------------------------------------
 
+// gitBaseEnv is the environment for every git subprocess grove spawns.
+// GIT_NO_LAZY_FETCH disables *implicit* promisor fetches (explicit `git fetch`
+// and `git clone` still work), so a blob-reading command such as `git cherry`
+// can never trigger a storm of on-demand fetches against the remote.
+func gitBaseEnv() []string {
+	return append(os.Environ(), "GIT_NO_LAZY_FETCH=1")
+}
+
+// gitContext bounds a single git invocation when GROVE_GIT_TIMEOUT (seconds) is
+// set, so a hung git on a broken partial clone cannot wedge a whole run. It is
+// unbounded by default so long clones/fetches are not interrupted.
+func gitContext() (context.Context, context.CancelFunc) {
+	if v := strings.TrimSpace(os.Getenv("GROVE_GIT_TIMEOUT")); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			return context.WithTimeout(context.Background(), time.Duration(n)*time.Second)
+		}
+	}
+	return context.Background(), func() {}
+}
+
 // Git runs `git -C dir args...`, streaming chatter to stderr.
 func Git(dir string, args ...string) error {
-	cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
+	ctx, cancel := gitContext()
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "git", append([]string{"-C", dir}, args...)...)
+	cmd.Env = gitBaseEnv()
 	cmd.Stdout = os.Stderr
 	cmd.Stderr = os.Stderr
 	return cmd.Run()
@@ -41,13 +67,19 @@ func Git(dir string, args ...string) error {
 
 // GitQuiet runs `git -C dir args...` discarding all output; returns success.
 func GitQuiet(dir string, args ...string) bool {
-	cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
+	ctx, cancel := gitContext()
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "git", append([]string{"-C", dir}, args...)...)
+	cmd.Env = gitBaseEnv()
 	return cmd.Run() == nil
 }
 
 // GitOut runs `git -C dir args...` and returns stdout (stderr discarded).
 func GitOut(dir string, args ...string) (string, error) {
-	cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
+	ctx, cancel := gitContext()
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "git", append([]string{"-C", dir}, args...)...)
+	cmd.Env = gitBaseEnv()
 	var out strings.Builder
 	cmd.Stdout = &out
 	cmd.Stderr = io.Discard
@@ -57,10 +89,26 @@ func GitOut(dir string, args ...string) (string, error) {
 
 // GitPlain runs `git args...` with no -C (used by clone).
 func GitPlain(args ...string) error {
-	cmd := exec.Command("git", args...)
+	ctx, cancel := gitContext()
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "git", args...)
+	cmd.Env = gitBaseEnv()
 	cmd.Stdout = os.Stderr
 	cmd.Stderr = os.Stderr
 	return cmd.Run()
+}
+
+// IsPartialClone reports whether origin is a promisor/partial remote. On such
+// clones, blob-reading commands (e.g. `git cherry`) would otherwise lazy-fetch
+// from the remote, so callers can skip that work.
+func (p *Project) IsPartialClone() bool {
+	if v, _ := GitOut(p.Base, "config", "--get", "remote.origin.promisor"); strings.TrimSpace(v) == "true" {
+		return true
+	}
+	if v, _ := GitOut(p.Base, "config", "--get", "remote.origin.partialclonefilter"); strings.TrimSpace(v) != "" {
+		return true
+	}
+	return false
 }
 
 // ---------------------------------------------------------------------------
