@@ -7,12 +7,14 @@
 package config
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"io/fs"
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 
 	"grove/examples"
 	"grove/internal/ui"
@@ -30,6 +32,10 @@ const SeedFilename = "grove.jsonc"
 // are not specific to a single recipe; everything else lives on the per-recipe
 // entries nested under Hooks.
 type Config struct {
+	// Schema holds the optional "$schema" reference some configs set to power
+	// editor autocomplete/linting. grove ignores its value, but the field must
+	// exist so the unknown-field check (warnUnknownFields) doesn't flag it.
+	Schema string `json:"$schema,omitempty"`
 	// Copy lists untracked files copied from the default-branch worktree into
 	// freshly created worktrees.
 	Copy []string `json:"copy,omitempty"`
@@ -196,7 +202,7 @@ func Defaults() Config {
 // recipes) and returned, with omitted top-level keys falling back to their
 // defaults.
 func Load(projectDir string) (Config, error) {
-	b, found, err := readConfig([]string{
+	b, path, found, err := readConfig([]string{
 		filepath.Join(projectDir, "grove.jsonc"),
 		filepath.Join(projectDir, Filename),
 	})
@@ -217,6 +223,7 @@ func Load(projectDir string) (Config, error) {
 	if err := json.Unmarshal(b, &cfg); err != nil {
 		return Defaults(), err
 	}
+	warnUnknownFields(b, filepath.Base(path))
 	if cfg.Hooks == nil {
 		cfg.Hooks = Defaults().Hooks
 	}
@@ -226,20 +233,46 @@ func Load(projectDir string) (Config, error) {
 }
 
 // readConfig reads the first existing file among paths and returns its
-// JSONC-stripped bytes. found is false when none of the paths exist; an
+// JSONC-stripped bytes along with the path that matched (used to label
+// warnings). found is false when none of the paths exist; an
 // existing-but-unreadable file is reported via err (found=true).
-func readConfig(paths []string) (b []byte, found bool, err error) {
+func readConfig(paths []string) (b []byte, path string, found bool, err error) {
 	for _, p := range paths {
 		raw, rerr := os.ReadFile(p)
 		if rerr != nil {
 			if errors.Is(rerr, fs.ErrNotExist) {
 				continue
 			}
-			return nil, true, rerr
+			return nil, p, true, rerr
 		}
-		return stripJSONC(raw), true, nil
+		return stripJSONC(raw), p, true, nil
 	}
-	return nil, false, nil
+	return nil, "", false, nil
+}
+
+// warnUnknownFields re-decodes b strictly (DisallowUnknownFields) to catch keys
+// that match no config field - the most common misconfiguration, e.g. a
+// top-level "recipes" array (recipes belong under "hooks") or a recipe field
+// like "sshHost". The lenient Unmarshal used to load the config silently drops
+// such keys, so without this check a wrong-shaped config appears to load fine
+// while doing nothing. It only warns (pointing at grove.schema.json); the
+// config still loads via the lenient parse. The decoder stops at the first
+// unknown field, so one warning is emitted per load even if several keys are
+// wrong. source labels the file (e.g. "grove.jsonc").
+func warnUnknownFields(b []byte, source string) {
+	dec := json.NewDecoder(bytes.NewReader(b))
+	dec.DisallowUnknownFields()
+	var probe Config
+	err := dec.Decode(&probe)
+	if err == nil {
+		return
+	}
+	const prefix = "json: unknown field "
+	if strings.HasPrefix(err.Error(), prefix) {
+		field := strings.TrimPrefix(err.Error(), prefix)
+		ui.Warn(source + ": unknown field " + field +
+			"; it will be ignored (check the config against grove.schema.json).")
+	}
 }
 
 // userConfigDir returns grove's user-level config directory, honoring
@@ -277,7 +310,7 @@ func LoadUser() (cfg Config, found bool, err error) {
 	if err != nil {
 		return Config{}, false, err
 	}
-	b, found, err := readConfig([]string{
+	b, path, found, err := readConfig([]string{
 		filepath.Join(dir, "config.jsonc"),
 		filepath.Join(dir, "config.json"),
 	})
@@ -290,6 +323,7 @@ func LoadUser() (cfg Config, found bool, err error) {
 	if err := json.Unmarshal(b, &cfg); err != nil {
 		return Config{}, true, err
 	}
+	warnUnknownFields(b, filepath.Base(path))
 	if cfg.Hooks != nil {
 		cfg.Hooks.migrateLegacy()
 	}
