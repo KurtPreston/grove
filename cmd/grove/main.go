@@ -86,8 +86,14 @@ func main() {
 	case "":
 		cmdSwitch(nil)
 	default:
-		// Bare `grove BRANCH`: treat the token as a branch (uses grove.json recipes).
-		cmdSwitch([]string{cmd})
+		if dir, ok := existingDir(cmd); ok {
+			// `grove PATH` where PATH is an existing directory: run user-level
+			// recipes for it, equivalent to `cd PATH && grove here`.
+			cmdLaunch([]string{dir})
+		} else {
+			// Bare `grove BRANCH`: treat the token as a branch (uses grove.json recipes).
+			cmdSwitch([]string{cmd})
+		}
 	}
 }
 
@@ -906,6 +912,34 @@ func trimSlash(s string) string {
 	return s
 }
 
+// expandTilde expands a leading ~ or ~/ to the user's home directory. Shells
+// normally expand these, but grove may still see a literal ~ (e.g. when quoted).
+func expandTilde(p string) string {
+	if p == "~" {
+		if home, err := os.UserHomeDir(); err == nil {
+			return home
+		}
+	} else if strings.HasPrefix(p, "~/") {
+		if home, err := os.UserHomeDir(); err == nil {
+			return filepath.Join(home, p[2:])
+		}
+	}
+	return p
+}
+
+// existingDir reports whether token names an existing directory (after tilde
+// expansion and trailing-slash trimming), returning the resolved path to use.
+func existingDir(token string) (string, bool) {
+	p := expandTilde(trimSlash(token))
+	if p == "" {
+		return "", false
+	}
+	if fi, err := os.Stat(p); err == nil && fi.IsDir() {
+		return p, true
+	}
+	return "", false
+}
+
 func hasBin(name string) bool {
 	_, err := exec.LookPath(name)
 	return err == nil
@@ -917,6 +951,7 @@ func usage() {
 Usage:
   grove clone GIT_URL [FOLDER]   Clone a repo (under FOLDER in the current dir) as a bare .base + default worktree
   grove BRANCH [--from REF]      Switch to (or create) BRANCH's worktree; run grove.json recipes
+  grove DIR                      If DIR is an existing directory, run user-level recipes for it (like 'cd DIR && grove here')
   grove open [BRANCH] [TYPES]    Open BRANCH (or current); TYPES filters grove.json recipes by type
   grove switch [BRANCH]          Like a bare BRANCH; no BRANCH opens an fzf picker
   grove path BRANCH              Resolve (creating if needed) BRANCH's worktree; print its path

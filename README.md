@@ -74,6 +74,7 @@ Set `GROVE_VERSION=vX.Y.Z` to pin a specific release (e.g. to downgrade) or
 |---------|-------------|
 | `grove clone GIT_URL [FOLDER]` | Clone a repo as a bare `.base` plus a worktree for the default branch under `FOLDER` in the current directory, and seed a starter (commented) `grove.jsonc` |
 | `grove BRANCH [--from REF]` | Switch to (or create) BRANCH's worktree and run the hooks in `grove.json`. When BRANCH is new, `beforeCreateBranch` hooks can abort creation, and `--from REF` bases it off REF (see [Choosing the base branch](#choosing-the-base-branch-for-new-branches)) |
+| `grove DIR` | When the argument is an existing directory (e.g. `grove .` or `grove ~/Code/slakkr`), run the user-level recipes for it — equivalent to `cd DIR && grove here` (see [Launching any folder](#launching-any-folder)). A directory path takes precedence over the branch interpretation |
 | `grove open [BRANCH] [TYPES] [--force]` | Open BRANCH (or the current worktree's branch if omitted/`.`); `TYPES` (comma-separated) filters the configured hooks to those recipe types; `--force` re-runs the `afterFirstOpen` bucket |
 | `grove switch [BRANCH]` | Like a bare BRANCH; with no branch and `fzf` installed, opens a picker |
 | `grove path BRANCH` | Resolve (creating if needed) BRANCH's worktree and print its absolute path to stdout |
@@ -390,9 +391,15 @@ Then, from inside a non-grove folder:
 ```sh
 grove            # bare grove outside a grove project falls back to launch
 grove .          # same
+grove ~/Code/slakkr          # any existing directory: launch it in place
 grove launch     # explicit; grove here is an alias
 grove launch ~/Code/slakkr   # launch a specific directory
 ```
+
+`grove DIR` works whether or not you're inside a grove project: when the
+argument names an existing directory it is launched directly (equivalent to
+`cd DIR && grove here`), taking precedence over treating the token as a branch
+name. Anything that isn't an existing directory still resolves as a branch.
 
 grove runs your user-level `onOpen` hooks against the directory, using the
 **folder name** (`slakkr`) for both the color and the webhook view name. No
@@ -409,8 +416,10 @@ Notes:
   `.vscode/settings.json` (added to `.git/info/exclude` locally, just like the
   worktree flow). Drop `vscode-color-config` from the user config if you don't
   want that.
-- Inside a grove project, `grove`/`grove .` behave exactly as before; the launch
-  fallback only kicks in when no `.base` is found above the current directory.
+- A bare `grove` inside a grove project behaves as before (fzf picker); the
+  no-argument launch fallback only kicks in when no `.base` is found above the
+  current directory. An explicit directory argument like `grove .` or
+  `grove ~/Code/slakkr`, however, always launches that directory directly.
 
 ## Project layout created by `grove clone URL myproj`
 
