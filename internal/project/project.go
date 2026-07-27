@@ -554,7 +554,8 @@ func (p *Project) RemoveWorktree(path string, force bool) error {
 	return Git(p.Base, "worktree", "remove", "--force", path)
 }
 
-// Prune fetches with --prune so gone upstreams are reflected before pruning.
+// Prune fetches (with --prune) so merge detection sees the latest
+// origin/<default> and remote-tracking refs before classifying worktrees.
 func (p *Project) Prune() {
 	if !GitQuiet(p.Base, "fetch", "--prune", "origin") {
 		ui.Warn("fetch failed; using local state.")

@@ -421,7 +421,7 @@ func cmdPrune(args []string) {
 		return
 	}
 
-	ui.Log("The following worktrees are merged or gone (branch refs are kept):")
+	ui.Log("The following worktrees are merged (branch refs are kept):")
 	for _, c := range candidates {
 		fmt.Fprintf(os.Stderr, "  %s %-28s %s%s%s",
 			color.Swatch(color.ForBranch(c.branch)), c.branch, ui.Dim, c.reason, ui.Reset)
@@ -462,7 +462,7 @@ func cmdPrune(args []string) {
 }
 
 // pruneReason returns why a worktree is a prune candidate ("merged", "squashed",
-// or "gone"), or "" when it should be kept. A worktree is never a candidate when
+// or "forge"), or "" when it should be kept. A worktree is never a candidate when
 // it is bare, has no branch, is the default branch, or is the current directory.
 func pruneReason(p *project.Project, w project.Worktree, def, cwd string, cfg config.Config, forgeMerged map[string]bool, partial bool) string {
 	if w.Path == "" || w.Branch == "" || w.Bare {
@@ -485,14 +485,15 @@ func pruneReason(p *project.Project, w project.Worktree, def, cwd string, cfg co
 	if forgeMerged[w.Branch] {
 		return "forge"
 	}
-	// Upstream still present? keep.
-	if project.GitQuiet(p.Base, "rev-parse", "--verify", "--quiet", w.Branch+"@{upstream}") {
-		return ""
-	}
-	// Was configured to track a remote (now gone)? candidate.
-	if project.GitQuiet(p.Base, "config", "--get", "branch."+w.Branch+".remote") {
-		return "gone"
-	}
+	// Otherwise keep it. A "gone" upstream (branch.<name>.remote set with no
+	// origin/<name> ref) is deliberately NOT a prune signal. grove points every
+	// branch at origin/<branch> for out-of-the-box push/pull (see setUpstream), so
+	// a brand-new branch that was never pushed lands in the exact same git state as
+	// one whose upstream was pushed and later deleted: `git branch -vv` reports
+	// "[origin/<name>: gone]" for both, and no local ref, reflog, or track field
+	// tells them apart. Treating that as a candidate discarded never-pushed work,
+	// so grove prunes only branches whose work is provably upstream (the
+	// merged/squashed/forge checks above).
 	return ""
 }
 
@@ -957,7 +958,7 @@ Usage:
   grove path BRANCH              Resolve (creating if needed) BRANCH's worktree; print its path
   grove tmux                     Attach the project session, building a window per worktree
   grove list | ls [--porcelain]  List worktrees; --porcelain prints branch<TAB>path to stdout
-  grove prune                    Remove merged/gone worktrees (keeps branch refs)
+  grove prune                    Remove merged worktrees (keeps branch refs)
   grove rm BRANCH [--force]      Remove a single worktree (keeps branch ref); --force discards local changes
   grove color BRANCH             Print the deterministic color for BRANCH
   grove launch | here [DIR]      Run user-level recipes for DIR (or cwd) without a worktree

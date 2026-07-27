@@ -80,7 +80,7 @@ Set `GROVE_VERSION=vX.Y.Z` to pin a specific release (e.g. to downgrade) or
 | `grove path BRANCH` | Resolve (creating if needed) BRANCH's worktree and print its absolute path to stdout |
 | `grove tmux` | Attach the project's tmux session, building a window for every worktree |
 | `grove list` / `ls [--porcelain]` | List worktrees; `--porcelain` prints `branch<TAB>path` to stdout |
-| `grove prune [--dry-run]` | Remove worktrees whose branches are merged (including squash/rebase merges) or whose upstream is gone (keeps branch refs); confirming at the prompt discards any local changes in those worktrees. `--dry-run`/`-n` lists candidates without removing anything |
+| `grove prune [--dry-run]` | Remove worktrees whose branches are merged, including squash/rebase merges (keeps branch refs); never-pushed branches are left alone. Confirming at the prompt discards any local changes in those worktrees. `--dry-run`/`-n` lists candidates without removing anything |
 | `grove rm BRANCH [--force]` | Remove a single worktree (keeps the branch ref); `--force` discards local changes |
 | `grove color BRANCH` | Print the deterministic color for a branch |
 | `grove launch` / `here [DIR]` | Run the user-level recipes for `DIR` (or cwd) without a worktree (see [Launching any folder](#launching-any-folder)) |
@@ -485,8 +485,15 @@ candidate when its branch is:
 - **squashed** — its net diff already exists in `origin/<default>`, detected via
   patch-equivalence so squash- and rebase-merged branches are caught even though
   their tips are not ancestors (on by default);
-- **forge** — matched to a merged pull request reported by the forge (opt-in);
-- **gone** — its configured upstream has disappeared after `git fetch --prune`.
+- **forge** — matched to a merged pull request reported by the forge (opt-in).
+
+A branch is never a candidate just because its upstream is "gone". grove points
+every branch at `origin/<branch>` for push/pull ergonomics, so a branch that was
+never pushed is indistinguishable from one whose upstream was deleted — `git
+branch -vv` reports `[origin/<branch>: gone]` for both, and no local ref, reflog,
+or track field tells them apart. Pruning on that signal would discard
+never-pushed work, so grove removes a worktree only when its work is provably
+upstream (merged/squashed/forge).
 
 The optional `prune` block tunes the squash and forge checks:
 

@@ -39,7 +39,8 @@ func squashOff() config.Config {
 // A plain (non-bare) repo doubles as p.Base: pruneReason only shells git against
 // it, and a working repo makes the merges/tracking config easy to script. The
 // origin/main ref is synthesized with update-ref instead of a second remote so
-// the "merged", "squashed", "gone", and "upstream present" states are exact.
+// the "merged", "squashed", "never pushed", and "upstream present" states are
+// exact.
 func TestPruneReason(t *testing.T) {
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git not available")
@@ -73,11 +74,15 @@ func TestPruneReason(t *testing.T) {
 	// Freeze the upstream default so it contains the merged + squashed work.
 	gitDo(t, base, "update-ref", "refs/remotes/origin/main", "main")
 
-	// gone: was tracking a remote branch that no longer exists; unmerged.
-	gitDo(t, base, "checkout", "-q", "-b", "feat-gone", "main")
-	gitCommit(t, base, "gone.txt", "g", "g1")
-	gitDo(t, base, "config", "branch.feat-gone.remote", "origin")
-	gitDo(t, base, "config", "branch.feat-gone.merge", "refs/heads/feat-gone")
+	// never pushed (a.k.a. "gone" upstream): grove points every branch at
+	// origin/<branch> for pushability, so a branch that was never pushed has
+	// branch.<name>.remote set with no origin/<name> ref — the exact same state as
+	// one whose upstream was pushed and later deleted. Neither is a prune
+	// candidate, so unpushed work is never discarded.
+	gitDo(t, base, "checkout", "-q", "-b", "feat-unpushed", "main")
+	gitCommit(t, base, "unpushed.txt", "g", "g1")
+	gitDo(t, base, "config", "branch.feat-unpushed.remote", "origin")
+	gitDo(t, base, "config", "branch.feat-unpushed.merge", "refs/heads/feat-unpushed")
 
 	// upstream present: tracks an existing origin ref; unmerged -> kept.
 	gitDo(t, base, "checkout", "-q", "-b", "feat-upstream", "main")
@@ -108,7 +113,7 @@ func TestPruneReason(t *testing.T) {
 	}{
 		{"regular merge", wt("feat-merged"), otherCwd, std, nil, false, "merged"},
 		{"squash merge", wt("feat-squash"), otherCwd, std, nil, false, "squashed"},
-		{"gone upstream", wt("feat-gone"), otherCwd, std, nil, false, "gone"},
+		{"never-pushed upstream kept", wt("feat-unpushed"), otherCwd, std, nil, false, ""},
 		{"upstream present kept", wt("feat-upstream"), otherCwd, std, nil, false, ""},
 		{"open unmerged kept", wt("feat-open"), otherCwd, std, nil, false, ""},
 		{"forge merged", wt("feat-open"), otherCwd, std, map[string]bool{"feat-open": true}, false, "forge"},
