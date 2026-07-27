@@ -53,6 +53,24 @@ func commandRecipe(ctx recipe.Context, rc config.RecipeConfig) error {
 	return cmd.Run()
 }
 
+// cliEnvAllowlist is the set of VSCODE_-prefixed variables that must survive
+// sanitizeLaunchEnv. In a remote/server session (e.g. running inside a
+// Cursor/VS Code remote workspace or WSL) the `cursor`/`code` CLI does not
+// launch a new Electron process; instead it forwards the "open folder" request
+// to the already-running window over an IPC socket. The server CLI refuses to
+// run — printing "Command is only available in WSL or inside a Visual Studio
+// Code terminal." — unless it can find that routing state:
+//
+//	if (!VSCODE_IPC_HOOK_CLI && !VSCODE_CLIENT_COMMAND) { … return }
+//
+// so stripping these along with the launcher vars breaks `cursor $GROVE_DIR`
+// in exactly the environments where it would otherwise work.
+var cliEnvAllowlist = map[string]bool{
+	"VSCODE_IPC_HOOK_CLI":       true, // integrated-terminal / remote CLI socket
+	"VSCODE_CLIENT_COMMAND":     true, // WSL fallback used by the same guard
+	"VSCODE_CLIENT_COMMAND_CWD": true, // paired cwd for VSCODE_CLIENT_COMMAND
+}
+
 // sanitizeLaunchEnv drops the VS Code / Electron launcher variables an editor
 // process leaks into its child environments. The common case is opening a
 // worktree in Cursor/VS Code via `command` (e.g. "cursor $GROVE_DIR"): when
@@ -67,14 +85,20 @@ func commandRecipe(ctx recipe.Context, rc config.RecipeConfig) error {
 // scrubs these for exactly this reason, which is why a hand-typed `cursor .`
 // works while the same command run through grove does not.
 //
-// Stripping them is safe for non-editor commands too (npm, git, …): these
-// variables only carry meaning to an Electron/VS Code process.
+// The exception is cliEnvAllowlist: a handful of VSCODE_ vars are how the CLI
+// talks to a running remote/WSL instance rather than launcher state, so those
+// are preserved. Stripping the rest is safe for non-editor commands too (npm,
+// git, …): those variables only carry meaning to an Electron/VS Code process.
 func sanitizeLaunchEnv(env []string) []string {
 	out := env[:0:0]
 	for _, kv := range env {
 		key := kv
 		if i := strings.IndexByte(kv, '='); i >= 0 {
 			key = kv[:i]
+		}
+		if cliEnvAllowlist[key] {
+			out = append(out, kv)
+			continue
 		}
 		if strings.HasPrefix(key, "VSCODE_") ||
 			key == "ELECTRON_RUN_AS_NODE" ||
