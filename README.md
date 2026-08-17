@@ -33,7 +33,10 @@ curl -fsSL https://raw.githubusercontent.com/KurtPreston/grove/main/install.sh |
 ```
 
 This downloads the latest release for your OS/arch and installs the `grove`
-binary to `~/.local/bin`. Set `GROVE_VERSION=vX.Y.Z` to pin a version or
+binary to `~/.local/bin`. It also installs optional shell scripts (the `cd`
+wrapper and tab-completion helpers) under `$XDG_DATA_HOME/grove` (default
+`~/.local/share/grove`). Sourcing those scripts is optional — see
+[Shell integration (optional)](#shell-integration-optional). Set `GROVE_VERSION=vX.Y.Z` to pin a version or
 `PREFIX=...` to change where the binary lands. You can also download an archive
 by hand from the [releases page](https://github.com/KurtPreston/grove/releases).
 
@@ -48,8 +51,10 @@ make install          # builds + installs to ~/.local/bin
 
 > Want `grove <branch>` to drop your shell *inside* the worktree it opens? That's
 > an opt-in extra that needs a one-line shell hook — see the
-> [`cd` recipe](#cd-move-your-shell-into-the-worktree-opt-in). Everything else
-> works without it.
+> [`cd` recipe](#cd-move-your-shell-into-the-worktree-opt-in). Tab completion
+> for branch names and subcommands is also optional — see
+> [Shell integration (optional)](#shell-integration-optional). Everything else
+> works without either hook.
 
 ### Updating
 
@@ -63,10 +68,54 @@ grove update --force   # reinstall even if already on the latest version
 `grove update` resolves the latest release from GitHub, downloads the archive for
 your OS/arch, verifies it against the release checksums, and atomically swaps the
 running binary. If grove's shell-integration scripts are already installed (under
-`$XDG_DATA_HOME/grove`, default `~/.local/share/grove`), they're refreshed too.
+`$XDG_DATA_HOME/grove`, default `~/.local/share/grove` — the `cd` wrapper and
+tab-completion scripts), they're refreshed too.
 Set `GROVE_VERSION=vX.Y.Z` to pin a specific release (e.g. to downgrade) or
 `GROVE_REPO=owner/repo` to update from a fork — the same knobs
 [`install.sh`](install.sh) honors.
+
+## Shell integration (optional)
+
+Grove ships small shell scripts alongside the binary. `install.sh` and
+`grove update` place them under `$XDG_DATA_HOME/grove` (default
+`~/.local/share/grove`); a source checkout has them under `shell/`. None of
+this is required for grove to manage worktrees — source only what you want.
+
+### Tab completion
+
+Grove ships optional completion scripts that complete subcommands, flags, and
+branch names (local heads plus `origin/*`, filtered by whatever you have typed).
+Inside a grove project, `grove sa<TAB>` offers every branch starting with `sa`.
+
+Source the script for your shell once (after `compinit` in zsh):
+
+```sh
+# bash
+source "$HOME/.local/share/grove/grove-completion.bash"
+# zsh
+source "$HOME/.local/share/grove/grove-completion.zsh"
+# fish
+source "$HOME/.local/share/grove/grove-completion.fish"
+```
+
+Building from source? Point `source` at the matching file under `shell/` in your
+checkout instead. Completion requires a grove binary that supports the hidden
+`grove __complete` helper (see `grove help`); older builds stay silent.
+
+### `cd` wrapper (for the opt-in `cd` recipe)
+
+The `cd` recipe needs a shell function that reads `$GROVE_CD_FILE` after grove
+exits and performs the actual `cd`. Source the wrapper once:
+
+```sh
+# bash/zsh
+source "$HOME/.local/share/grove/grove.bash"
+# fish
+source "$HOME/.local/share/grove/grove.fish"
+```
+
+See [`cd`: move your shell into the worktree (opt-in)](#cd-move-your-shell-into-the-worktree-opt-in)
+for when and why to enable the recipe.
 
 ## Usage
 
@@ -244,7 +293,9 @@ when you want `grove <branch>` to drop you inside the worktree it just opened:
 The catch: a binary can't change its parent shell's working directory. So the
 `cd` recipe writes the target path to `$GROVE_CD_FILE` and a tiny shell function
 does the actual `cd` once grove exits. That function ships with grove, but you
-have to source it once from your shell's startup file:
+have to source it once from your shell's startup file (see the
+[`cd` wrapper](#cd-wrapper-for-the-opt-in-cd-recipe) under
+[Shell integration (optional)](#shell-integration-optional)):
 
 ```sh
 # bash/zsh
@@ -258,27 +309,6 @@ your checkout instead. Without the sourced function the `cd` recipe warns once
 and does nothing — every other recipe still runs. Put `cd` before a `tmux`
 entry in `onOpen` so the destination is recorded before tmux takes over the
 terminal.
-
-### Tab completion
-
-Grove ships shell completion scripts that complete subcommands, flags, and
-branch names (local heads plus `origin/*`, filtered by whatever you have typed).
-Inside a grove project, `grove sa<TAB>` offers every branch starting with `sa`.
-
-Source the script for your shell once (after `compinit` in zsh):
-
-```sh
-# bash
-source "$HOME/.local/share/grove/grove-completion.bash"
-# zsh
-source "$HOME/.local/share/grove/grove-completion.zsh"
-# fish
-source "$HOME/.local/share/grove/grove-completion.fish"
-```
-
-Building from source? Point `source` at the matching file under `shell/` in your
-checkout. Completion requires a grove binary that supports the hidden
-`grove __complete` helper (see `grove help`); older builds stay silent.
 
 ### `webhook`: generic HTTP POST
 
