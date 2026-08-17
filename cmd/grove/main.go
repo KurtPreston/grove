@@ -83,6 +83,8 @@ func main() {
 		cmdUpdate(args[1:])
 	case "help", "-h", "--help":
 		usage()
+	case "__complete":
+		cmdComplete(args[1:])
 	case "":
 		cmdSwitch(nil)
 	default:
@@ -965,6 +967,7 @@ Usage:
   grove version                  Print the grove version and build metadata
   grove update [--force]         Update grove in place to the latest published release
   grove help                     Show this help
+  grove __complete WORD...       Hidden: print tab-completion candidates (used by shell scripts)
 
 Pass --force to open/switch to re-run the afterFirstOpen bucket (one-time setup)
 on an existing worktree.
