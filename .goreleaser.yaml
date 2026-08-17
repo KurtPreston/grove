@@ -29,6 +29,9 @@ archives:
       - LICENSE*
       - shell/grove.bash
       - shell/grove.fish
+      - shell/grove-completion.bash
+      - shell/grove-completion.zsh
+      - shell/grove-completion.fish
 
 checksum:
   name_template: "checksums.txt"

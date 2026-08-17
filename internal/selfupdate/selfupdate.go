@@ -39,7 +39,7 @@ const DefaultRepo = "KurtPreston/grove"
 // .goreleaser.yaml and consumed by install.sh.
 const binaryName = "grove"
 
-var shellFiles = []string{"grove.bash", "grove.fish"}
+var shellFiles = []string{"grove.bash", "grove.fish", "grove-completion.bash", "grove-completion.zsh", "grove-completion.fish"}
 
 // Base URLs are package vars (not consts) so tests can point the flow at an
 // httptest server instead of the real GitHub.

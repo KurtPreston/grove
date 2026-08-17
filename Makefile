@@ -12,6 +12,7 @@ install: build
 	install -m 0755 bin/$(BINARY) $(BINDIR)/$(BINARY)
 	@echo "Installed $(BINARY) -> $(BINDIR)/$(BINARY)"
 	@echo "Source shell/grove.bash (bash/zsh) or shell/grove.fish (fish) for the cd-wrapper."
+	@echo "Source shell/grove-completion.* for tab completion."
 
 vet:
 	go vet ./...

@@ -90,7 +90,7 @@ echo "Installed grove -> $bindir/grove"
 
 # Install the shell-integration scripts (bundled in the archive under shell/).
 mkdir -p "$sharedir"
-for f in grove.bash grove.fish; do
+for f in grove.bash grove.fish grove-completion.bash grove-completion.zsh grove-completion.fish; do
   [ -f "$tmp/shell/$f" ] && install -m 0644 "$tmp/shell/$f" "$sharedir/$f"
 done
 
@@ -108,4 +108,11 @@ grove's shell integration once (skip this unless you add a 'cd' recipe):
 
   bash/zsh:  echo 'source "$sharedir/grove.bash"' >> ~/.bashrc    # or ~/.zshrc
   fish:      echo 'source "$sharedir/grove.fish"' >> ~/.config/fish/config.fish
+
+Optional: for tab completion of branch names and subcommands, source the
+completion script for your shell (after compinit in zsh):
+
+  bash:      echo 'source "$sharedir/grove-completion.bash"' >> ~/.bashrc
+  zsh:       echo 'source "$sharedir/grove-completion.zsh"' >> ~/.zshrc
+  fish:      echo 'source "$sharedir/grove-completion.fish"' >> ~/.config/fish/config.fish
 EOF

@@ -259,6 +259,27 @@ and does nothing — every other recipe still runs. Put `cd` before a `tmux`
 entry in `onOpen` so the destination is recorded before tmux takes over the
 terminal.
 
+### Tab completion
+
+Grove ships shell completion scripts that complete subcommands, flags, and
+branch names (local heads plus `origin/*`, filtered by whatever you have typed).
+Inside a grove project, `grove sa<TAB>` offers every branch starting with `sa`.
+
+Source the script for your shell once (after `compinit` in zsh):
+
+```sh
+# bash
+source "$HOME/.local/share/grove/grove-completion.bash"
+# zsh
+source "$HOME/.local/share/grove/grove-completion.zsh"
+# fish
+source "$HOME/.local/share/grove/grove-completion.fish"
+```
+
+Building from source? Point `source` at the matching file under `shell/` in your
+checkout. Completion requires a grove binary that supports the hidden
+`grove __complete` helper (see `grove help`); older builds stay silent.
+
 ### `webhook`: generic HTTP POST
 
 The webhook recipe POSTs an arbitrary JSON `params` object to `url`. String
