@@ -24,7 +24,14 @@ func gitCommit(t *testing.T, repo, name, content, msg string) {
 		t.Fatal(err)
 	}
 	gitDo(t, repo, "add", name)
-	gitDo(t, repo, "commit", "-q", "-m", msg)
+	// Pass identity (and disable signing) per-invocation so commits succeed even
+	// when the repo has no local config and the environment has no global git
+	// identity — as on CI runners.
+	gitDo(t, repo,
+		"-c", "user.email=grove@test",
+		"-c", "user.name=grove",
+		"-c", "commit.gpgsign=false",
+		"commit", "-q", "-m", msg)
 }
 
 func squashOff() config.Config {
