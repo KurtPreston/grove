@@ -796,23 +796,18 @@ func fzfPickFrom(items []string, prompt string) string {
 // runs when a brand-new branch is being created (existing branches are reused
 // without consulting it). Resolution order:
 //   - an explicit --from REF wins;
-//   - on the default branch, when the current branch can't be determined, or
-//     when stdin is not a TTY, keep the historical behavior and base off the
-//     default branch;
-//   - otherwise prompt for any base branch.
+//   - when stdin is not a TTY, base off the default branch;
+//   - otherwise prompt for the base branch, whatever branch we are on.
 func baseResolver(p *project.Project, from string) func(def string) (string, error) {
 	return func(def string) (string, error) {
 		if from != "" {
 			return from, nil
 		}
-		cur, ok := currentBranch(mustGetwd())
-		if !ok || cur == def {
-			return def, nil
-		}
 		if !isInteractive() {
 			ui.Info(fmt.Sprintf("Basing new branch off default '%s' (non-interactive; pass --from to choose).", def))
 			return def, nil
 		}
+		cur, _ := currentBranch(mustGetwd())
 		return pickBaseBranch(p, def, cur)
 	}
 }
@@ -974,10 +969,10 @@ on an existing worktree.
 
 When a branch doesn't exist yet, grove creates it. Before creating it, grove runs
 the beforeCreateBranch hooks (if any); a non-zero exit aborts creation entirely.
-If you're on a non-default branch and stdin is a TTY, grove then asks which branch
-to base the new branch off (fzf when available, else a numbered menu). Pass --from
-REF to choose the base non-interactively (also used by scripts and non-TTY
-sessions); otherwise the new branch is based off the default branch.
+If stdin is a TTY, grove then asks which branch to base the new branch off (fzf
+when available, else a numbered menu). Pass --from REF to choose the base without
+being asked (also used by scripts and non-TTY sessions); otherwise the new branch
+is based off the default branch.
 
 Worktree folders deleted outside grove (e.g. 'rm -rf') are reconciled automatically
 on the next command: grove drops git's stale bookkeeping so the worktree stops

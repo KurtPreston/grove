@@ -154,13 +154,11 @@ lost.
 `origin` (fetched and tracked). Only when the branch exists nowhere does grove
 create it, and then it has to pick a starting point.
 
-- On the **default branch** (the common case), grove bases the new branch off
-  the default branch, exactly as before.
-- On a **non-default branch** (e.g. you're on `feature/a` and run
-  `grove feature/b`), the base is ambiguous, so grove **asks** which branch to
-  branch off — every project branch is offered, with the default and current
-  branches surfaced first. With `fzf` installed you get the picker; otherwise a
-  numbered menu that also accepts a typed branch name.
+Whatever branch you happen to be on, grove **asks** which branch to branch off —
+every project branch is offered, with the default and current branches surfaced
+first. With `fzf` installed you get the picker; otherwise a numbered menu that
+also accepts a typed branch name and defaults to the default branch on a bare
+Enter.
 
 Pass `--from REF` to name the base branch up front and skip the prompt (works
 with `grove BRANCH`, `grove open`, and `grove path`). This is also what runs in
@@ -168,7 +166,7 @@ non-interactive contexts — scripts, pipes, and non-TTY SSH commands never bloc
 on the prompt; without `--from` they fall back to the default branch.
 
 ```sh
-grove feature/b                 # on a non-default branch: prompts for the base
+grove feature/b                 # prompts for the base branch
 grove feature/b --from main     # base off main, no prompt
 grove feature/b --from feature/a  # stack feature/b on top of feature/a
 ```
