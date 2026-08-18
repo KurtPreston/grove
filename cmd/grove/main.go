@@ -22,8 +22,10 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"grove/internal/color"
 	"grove/internal/config"
@@ -331,33 +333,109 @@ func tmuxLayout(cfg config.Config) string {
 
 func cmdList(args []string) {
 	p := mustResolve()
-	if len(args) >= 1 && args[0] == "--porcelain" {
-		listPorcelain(p)
-		return
-	}
+	porcelain, byTime := parseListFlags(args)
 	wts, _ := p.Worktrees()
-	fmt.Fprintf(os.Stderr, "%sProject:%s %s  %s(%s)%s\n",
-		ui.Bold, ui.Reset, p.Name(), ui.Dim, p.Dir, ui.Reset)
-	session := project.Sanitize(p.Name())
+	var rows []project.Worktree
 	for _, w := range wts {
 		if w.Bare {
 			continue
 		}
-		printRow(p, session, w)
-	}
-}
-
-func listPorcelain(p *project.Project) {
-	wts, _ := p.Worktrees()
-	for _, w := range wts {
-		if w.Bare || w.Branch == "" {
+		if porcelain && w.Branch == "" {
 			continue
 		}
-		fmt.Printf("%s\t%s\n", w.Branch, w.Path)
+		rows = append(rows, w)
+	}
+	heads := make([]string, 0, len(rows))
+	for _, w := range rows {
+		heads = append(heads, w.Head)
+	}
+	times := p.CommitTimes(heads)
+	if byTime {
+		sortWorktreesByCommitTime(rows, times)
+	}
+	if porcelain {
+		for _, w := range rows {
+			fmt.Printf("%s\t%s\n", w.Branch, w.Path)
+		}
+		return
+	}
+	fmt.Fprintf(os.Stderr, "%sProject:%s %s  %s(%s)%s\n",
+		ui.Bold, ui.Reset, p.Name(), ui.Dim, p.Dir, ui.Reset)
+	session := project.Sanitize(p.Name())
+	now := time.Now()
+	ages := make([]string, len(rows))
+	ageWidth := 0
+	for i, w := range rows {
+		ages[i] = formatCommitAge(times[w.Head], now)
+		if n := len(ages[i]); n > ageWidth {
+			ageWidth = n
+		}
+	}
+	for i, w := range rows {
+		printRow(p, session, w, ages[i], ageWidth)
 	}
 }
 
-func printRow(p *project.Project, session string, w project.Worktree) {
+func parseListFlags(args []string) (porcelain, byTime bool) {
+	for _, a := range args {
+		switch a {
+		case "--porcelain":
+			porcelain = true
+		case "-t", "--time":
+			byTime = true
+		}
+	}
+	return porcelain, byTime
+}
+
+func sortWorktreesByCommitTime(wts []project.Worktree, times map[string]time.Time) {
+	sort.SliceStable(wts, func(i, j int) bool {
+		ti, tj := times[wts[i].Head], times[wts[j].Head]
+		if !ti.Equal(tj) {
+			return ti.After(tj)
+		}
+		return wts[i].Branch < wts[j].Branch
+	})
+}
+
+func formatCommitAge(at, now time.Time) string {
+	if at.IsZero() {
+		return "--"
+	}
+	d := now.Sub(at)
+	if d < 0 {
+		d = 0
+	}
+	if d < time.Minute {
+		return "just now"
+	} else if d < time.Hour {
+		return ageUnits(int(d.Minutes()), "minute")
+	} else if d < 24*time.Hour {
+		return ageUnits(int(d.Hours()), "hour")
+	} else if d < 30*24*time.Hour {
+		return ageUnits(int(d.Hours()/24), "day")
+	} else if d < 365*24*time.Hour {
+		n := int(d.Hours() / 24 / 30)
+		if n < 1 {
+			n = 1
+		}
+		return ageUnits(n, "month")
+	}
+	n := int(d.Hours() / 24 / 365)
+	if n < 1 {
+		n = 1
+	}
+	return ageUnits(n, "year")
+}
+
+func ageUnits(n int, unit string) string {
+	if n == 1 {
+		return "1 " + unit + " ago"
+	}
+	return fmt.Sprintf("%d %ss ago", n, unit)
+}
+
+func printRow(p *project.Project, session string, w project.Worktree, age string, ageWidth int) {
 	branch := w.Branch
 	if branch == "" {
 		branch = "(no branch)"
@@ -375,8 +453,8 @@ func printRow(p *project.Project, session string, w project.Worktree) {
 		dirty = ui.Yellow + "*" + ui.Reset
 	}
 
-	fmt.Fprintf(os.Stderr, "%s  %s  %s %s\n",
-		sw, tmuxMark, dirty, branch)
+	fmt.Fprintf(os.Stderr, "%s  %s  %s %s%s%s  %s\n",
+		sw, tmuxMark, dirty, ui.Dim, fmt.Sprintf("%-*s", ageWidth, age), ui.Reset, branch)
 }
 
 func cmdPrune(args []string) {
@@ -954,7 +1032,7 @@ Usage:
   grove switch [BRANCH]          Like a bare BRANCH; no BRANCH opens an fzf picker
   grove path BRANCH              Resolve (creating if needed) BRANCH's worktree; print its path
   grove tmux                     Attach the project session, building a window per worktree
-  grove list | ls [--porcelain]  List worktrees; --porcelain prints branch<TAB>path to stdout
+  grove list | ls [-t] [--porcelain]  List worktrees with last commit time; -t newest first; --porcelain prints branch<TAB>path
   grove prune                    Remove merged worktrees (keeps branch refs)
   grove rm BRANCH [--force]      Remove a single worktree (keeps branch ref); --force discards local changes
   grove color BRANCH             Print the deterministic color for BRANCH

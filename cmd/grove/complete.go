@@ -28,16 +28,16 @@ var fileArgIndex = map[string][]int{
 
 // completeFlags maps a subcommand to its supported flags for completion.
 var completeFlags = map[string][]string{
-	"open":     {"--force", "-f", "--from"},
-	"switch":   {"--force", "-f", "--from"},
-	"sw":       {"--force", "-f", "--from"},
-	"path":     {"--from"},
-	"prune":    {"--dry-run", "-n"},
-	"rm":       {"--force", "-f"},
-	"remove":   {"--force", "-f"},
-	"list":     {"--porcelain"},
-	"ls":       {"--porcelain"},
-	"update":   {"--force", "-f"},
+	"open":   {"--force", "-f", "--from"},
+	"switch": {"--force", "-f", "--from"},
+	"sw":     {"--force", "-f", "--from"},
+	"path":   {"--from"},
+	"prune":  {"--dry-run", "-n"},
+	"rm":     {"--force", "-f"},
+	"remove": {"--force", "-f"},
+	"list":   {"--porcelain", "-t", "--time"},
+	"ls":     {"--porcelain", "-t", "--time"},
+	"update": {"--force", "-f"},
 }
 
 // cmdComplete implements `grove __complete WORD...` for shell tab completion.
@@ -98,7 +98,7 @@ func parseCompleteWords(words []string) (cmd string, argIdx int, positional []st
 			i += 2
 			continue
 		}
-		if w == "--force" || w == "-f" || w == "--dry-run" || w == "-n" || w == "--porcelain" {
+		if w == "--force" || w == "-f" || w == "--dry-run" || w == "-n" || w == "--porcelain" || w == "-t" || w == "--time" {
 			i++
 			continue
 		}

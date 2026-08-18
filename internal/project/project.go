@@ -223,6 +223,41 @@ func (p *Project) Worktrees() ([]Worktree, error) {
 	return res, nil
 }
 
+// CommitTimes returns the committer time for each distinct commit SHA in heads,
+// keyed by full SHA. Missing or unreadable SHAs are omitted.
+func (p *Project) CommitTimes(heads []string) map[string]time.Time {
+	seen := make(map[string]bool, len(heads))
+	args := []string{"log", "--no-walk", "--format=%H %ct"}
+	for _, h := range heads {
+		if h == "" || seen[h] {
+			continue
+		}
+		seen[h] = true
+		args = append(args, h)
+	}
+	times := make(map[string]time.Time, len(seen))
+	if len(seen) == 0 {
+		return times
+	}
+	out, err := GitOut(p.Base, args...)
+	if err != nil && out == "" {
+		return times
+	}
+	sc := bufio.NewScanner(strings.NewReader(out))
+	for sc.Scan() {
+		fields := strings.Fields(sc.Text())
+		if len(fields) < 2 {
+			continue
+		}
+		unix, err := strconv.ParseInt(fields[1], 10, 64)
+		if err != nil {
+			continue
+		}
+		times[fields[0]] = time.Unix(unix, 0)
+	}
+	return times
+}
+
 // WorktreePathFor returns the worktree directory for a branch, if one exists.
 func (p *Project) WorktreePathFor(branch string) (string, bool) {
 	wts, err := p.Worktrees()

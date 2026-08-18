@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 // runGit runs git in dir, failing the test on error. A fixed identity is set so
@@ -88,6 +89,48 @@ func TestWorktreesMarksDeletedDirPrunable(t *testing.T) {
 	}
 	if by["feature-b"].Prunable {
 		t.Errorf("feature-b should not be prunable; its folder still exists")
+	}
+}
+
+func TestCommitTimes(t *testing.T) {
+	p := newTestProject(t, "older", "newer")
+	commitDated(t, filepath.Join(p.Dir, "older"), "2020-01-01 00:00:00 +0000", "old.txt", "old")
+	commitDated(t, filepath.Join(p.Dir, "newer"), "2021-06-15 12:00:00 +0000", "new.txt", "new")
+
+	wts := mustWorktrees(t, p)
+	by := branchNames(wts)
+	times := p.CommitTimes([]string{by["older"].Head, by["newer"].Head, by["older"].Head, ""})
+
+	gotOlder := times[by["older"].Head].UTC()
+	gotNewer := times[by["newer"].Head].UTC()
+	if !gotOlder.Equal(time.Date(2020, 1, 1, 0, 0, 0, 0, time.UTC)) {
+		t.Errorf("older committer time = %v, want 2020-01-01 00:00:00 UTC", gotOlder)
+	}
+	if !gotNewer.Equal(time.Date(2021, 6, 15, 12, 0, 0, 0, time.UTC)) {
+		t.Errorf("newer committer time = %v, want 2021-06-15 12:00:00 UTC", gotNewer)
+	}
+	if len(times) != 2 {
+		t.Errorf("CommitTimes returned %d entries, want 2 (duplicates and empty SHAs skipped)", len(times))
+	}
+}
+
+func commitDated(t *testing.T, dir, when, name, msg string) {
+	t.Helper()
+	if err := os.WriteFile(filepath.Join(dir, name), []byte(msg), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, dir, "add", name)
+	cmd := exec.Command("git", "-C", dir,
+		"-c", "user.email=grove@test",
+		"-c", "user.name=grove",
+		"-c", "commit.gpgsign=false",
+		"commit", "-q", "-m", msg)
+	cmd.Env = append(os.Environ(),
+		"GIT_AUTHOR_DATE="+when,
+		"GIT_COMMITTER_DATE="+when,
+	)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("dated commit in %s failed: %v\n%s", dir, err, out)
 	}
 }
 

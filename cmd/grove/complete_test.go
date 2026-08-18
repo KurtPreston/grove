@@ -150,6 +150,17 @@ func TestCompleteFlags(t *testing.T) {
 	}
 }
 
+func TestCompleteListFlags(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+	_, wt := setupCompleteProject(t)
+	out := captureComplete(t, wt, "list", "-")
+	if !strings.Contains(out, "-t") || !strings.Contains(out, "--porcelain") {
+		t.Fatalf("expected list flags, got %q", out)
+	}
+}
+
 func TestCompleteSubcommands(t *testing.T) {
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git not available")

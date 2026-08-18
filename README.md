@@ -128,7 +128,7 @@ for when and why to enable the recipe.
 | `grove switch [BRANCH]` | Like a bare BRANCH; with no branch and `fzf` installed, opens a picker |
 | `grove path BRANCH` | Resolve (creating if needed) BRANCH's worktree and print its absolute path to stdout |
 | `grove tmux` | Attach the project's tmux session, building a window for every worktree |
-| `grove list` / `ls [--porcelain]` | List worktrees; `--porcelain` prints `branch<TAB>path` to stdout |
+| `grove list` / `ls [-t] [--porcelain]` | List worktrees with each branch's last commit time; `-t` orders newest first; `--porcelain` prints `branch<TAB>path` to stdout |
 | `grove prune [--dry-run]` | Remove worktrees whose branches are merged, including squash/rebase merges (keeps branch refs); never-pushed branches are left alone. Confirming at the prompt discards any local changes in those worktrees. `--dry-run`/`-n` lists candidates without removing anything |
 | `grove rm BRANCH [--force]` | Remove a single worktree (keeps the branch ref); `--force` discards local changes |
 | `grove color BRANCH` | Print the deterministic color for a branch |
