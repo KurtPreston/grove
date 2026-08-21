@@ -87,6 +87,12 @@ Grove ships optional completion scripts that complete subcommands, flags, and
 branch names (local heads plus `origin/*`, filtered by whatever you have typed).
 Inside a grove project, `grove sa<TAB>` offers every branch starting with `sa`.
 
+Because a bare argument can also be a directory (see
+[Launching any folder](#launching-any-folder)), the same position completes
+directory paths: `grove ../../<TAB>` lists the directories in the grandparent,
+and `grove ~/Code/<TAB>` walks into `~/Code`. Directory arguments to
+`grove launch`, `grove here`, and `grove clone` complete the same way.
+
 Source the script for your shell once (after `compinit` in zsh):
 
 ```sh
