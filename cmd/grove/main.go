@@ -22,6 +22,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -359,8 +360,9 @@ func cmdList(args []string) {
 		}
 		return
 	}
-	fmt.Fprintf(os.Stderr, "%sProject:%s %s  %s(%s)%s\n",
-		ui.Bold, ui.Reset, p.Name(), ui.Dim, p.Dir, ui.Reset)
+	styled := stdoutIsTerminal()
+	fmt.Println(style(fmt.Sprintf("%sProject:%s %s  %s(%s)%s",
+		ui.Bold, ui.Reset, p.Name(), ui.Dim, p.Dir, ui.Reset), styled))
 	session := project.Sanitize(p.Name())
 	now := time.Now()
 	ages := make([]string, len(rows))
@@ -372,7 +374,7 @@ func cmdList(args []string) {
 		}
 	}
 	for i, w := range rows {
-		printRow(p, session, w, ages[i], ageWidth)
+		printRow(p, session, w, ages[i], ageWidth, styled)
 	}
 }
 
@@ -435,13 +437,11 @@ func ageUnits(n int, unit string) string {
 	return fmt.Sprintf("%d %ss ago", n, unit)
 }
 
-func printRow(p *project.Project, session string, w project.Worktree, age string, ageWidth int) {
+func printRow(p *project.Project, session string, w project.Worktree, age string, ageWidth int, styled bool) {
 	branch := w.Branch
 	if branch == "" {
 		branch = "(no branch)"
 	}
-	hex := color.ForBranch(branch)
-	sw := color.Swatch(hex)
 
 	tmuxMark := ui.Dim + " -- " + ui.Reset
 	if w.Branch != "" && tmux.Has() && tmux.WindowExists(session, project.Sanitize(w.Branch)) {
@@ -453,8 +453,13 @@ func printRow(p *project.Project, session string, w project.Worktree, age string
 		dirty = ui.Yellow + "*" + ui.Reset
 	}
 
-	fmt.Fprintf(os.Stderr, "%s  %s  %s %s%s%s  %s\n",
-		sw, tmuxMark, dirty, ui.Dim, fmt.Sprintf("%-*s", ageWidth, age), ui.Reset, branch)
+	row := fmt.Sprintf("%s  %s %s%s%s  %s",
+		tmuxMark, dirty, ui.Dim, fmt.Sprintf("%-*s", ageWidth, age), ui.Reset, branch)
+	if styled {
+		// The swatch is nothing but color, so it only earns its space on a terminal.
+		row = color.Swatch(color.ForBranch(branch)) + "  " + row
+	}
+	fmt.Println(style(row, styled))
 }
 
 func cmdPrune(args []string) {
@@ -965,6 +970,28 @@ func isInteractive() bool {
 		return false
 	}
 	return fi.Mode()&os.ModeCharDevice != 0
+}
+
+// stdoutIsTerminal reports whether stdout is a terminal. Commands that print
+// results to stdout use it to decide whether color is worth emitting: escape
+// codes help a human and only corrupt a pipe or file.
+func stdoutIsTerminal() bool {
+	fi, err := os.Stdout.Stat()
+	if err != nil {
+		return false
+	}
+	return fi.Mode()&os.ModeCharDevice != 0
+}
+
+var sgr = regexp.MustCompile("\x1b\\[[0-9;]*m")
+
+// style returns s unchanged when styled, and with its SGR escapes removed
+// otherwise, so one formatting path serves both terminals and pipes.
+func style(s string, styled bool) string {
+	if styled {
+		return s
+	}
+	return sgr.ReplaceAllString(s, "")
 }
 
 // readLine reads a single line from stdin (without the trailing newline).

@@ -236,13 +236,16 @@ func TestListShowsCommitAgeAndSortsWithT(t *testing.T) {
 	if !strings.Contains(out, "years ago") && !strings.Contains(out, "year ago") {
 		t.Fatalf("list missing commit age: %q", out)
 	}
+	if strings.Contains(out, "\x1b[") {
+		t.Fatalf("list should drop color when stdout is not a terminal: %q", out)
+	}
 
 	sorted := captureList(t, filepath.Join(proj, "older"), "-t")
 	if i, j := strings.Index(sorted, "newer"), strings.Index(sorted, "older"); i < 0 || j < 0 || i > j {
 		t.Fatalf("-t should list newer before older, got %q", sorted)
 	}
 
-	porcelain := captureListStdout(t, filepath.Join(proj, "older"), "-t", "--porcelain")
+	porcelain := captureList(t, filepath.Join(proj, "older"), "-t", "--porcelain")
 	lines := strings.Split(strings.TrimSpace(porcelain), "\n")
 	if len(lines) < 2 || !strings.HasPrefix(lines[0], "newer\t") {
 		t.Fatalf("-t --porcelain should start with newer, got %q", porcelain)
@@ -270,35 +273,6 @@ func gitCommitDated(t *testing.T, repo, when, name, content, msg string) {
 }
 
 func captureList(t *testing.T, dir string, args ...string) string {
-	t.Helper()
-	oldWd, err := os.Getwd()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Chdir(dir); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = os.Chdir(oldWd) })
-
-	oldErr := os.Stderr
-	r, w, err := os.Pipe()
-	if err != nil {
-		t.Fatal(err)
-	}
-	os.Stderr = w
-	cmdList(args)
-	if err := w.Close(); err != nil {
-		t.Fatal(err)
-	}
-	os.Stderr = oldErr
-	var buf bytes.Buffer
-	if _, err := io.Copy(&buf, r); err != nil {
-		t.Fatal(err)
-	}
-	return buf.String()
-}
-
-func captureListStdout(t *testing.T, dir string, args ...string) string {
 	t.Helper()
 	oldWd, err := os.Getwd()
 	if err != nil {

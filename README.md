@@ -128,7 +128,7 @@ for when and why to enable the recipe.
 | `grove switch [BRANCH]` | Like a bare BRANCH; with no branch and `fzf` installed, opens a picker |
 | `grove path BRANCH` | Resolve (creating if needed) BRANCH's worktree and print its absolute path to stdout |
 | `grove tmux` | Attach the project's tmux session, building a window for every worktree |
-| `grove list` / `ls [-t] [--porcelain]` | List worktrees with each branch's last commit time; `-t` orders newest first; `--porcelain` prints `branch<TAB>path` to stdout |
+| `grove list` / `ls [-t] [--porcelain]` | List worktrees with each branch's last commit time; `-t` orders newest first; `--porcelain` prints `branch<TAB>path` |
 | `grove prune [--dry-run]` | Remove worktrees whose branches are merged, including squash/rebase merges (keeps branch refs); never-pushed branches are left alone. Confirming at the prompt discards any local changes in those worktrees. `--dry-run`/`-n` lists candidates without removing anything |
 | `grove rm BRANCH [--force]` | Remove a single worktree (keeps the branch ref); `--force` discards local changes |
 | `grove color BRANCH` | Print the deterministic color for a branch |
@@ -136,8 +136,10 @@ for when and why to enable the recipe.
 | `grove update [--force]` | Update grove in place to the latest published release (downloads, verifies, and swaps the binary); `--force` reinstalls even when already current (see [Updating](#updating)) |
 | `grove help` | Show help |
 
-`grove path` and `grove ls --porcelain` write only their result to stdout (all
-status/log output goes to stderr), so external tooling can drive grove over SSH.
+Commands write their result to stdout and all status/log output to stderr, so
+external tooling can drive grove over SSH and `grove ls | grep foo` filters the
+listing. `grove ls` drops its color when stdout is not a terminal; use
+`--porcelain` for a stable `branch<TAB>path` format.
 
 `grove rm`/`grove prune` remove a worktree even when it contains submodules —
 plain `git worktree remove` refuses those, so grove clears git's submodule guard

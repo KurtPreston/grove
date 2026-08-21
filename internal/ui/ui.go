@@ -1,6 +1,6 @@
 // Package ui holds the small set of terminal output helpers shared across grove.
-// Everything here writes to stderr so that stdout stays reserved for machine
-// consumers (e.g. `grove path` and `grove list --porcelain`).
+// Everything here writes to stderr: status and log chatter stays out of the way
+// of stdout, which carries command results (e.g. `grove path` and `grove list`).
 package ui
 
 import (
