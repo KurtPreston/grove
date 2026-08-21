@@ -29,16 +29,19 @@ function __grove_complete
     end
     set -a args $cur
 
-    set -l candidates (command grove __complete $args 2>/dev/null)
-    if test (count $candidates) -eq 1 -a "$candidates[1]" = "__grove_files__"
-        if functions -q __fish_complete_path
-            __fish_complete_path $cur
+    # A __grove_files__ line means "also complete directories here"; it can
+    # arrive on its own or mixed in with branch and subcommand candidates.
+    set -l want_dirs 0
+    for c in (command grove __complete $args 2>/dev/null)
+        if test "$c" = "__grove_files__"
+            set want_dirs 1
+        else
+            echo $c
         end
-        return
     end
 
-    for c in $candidates
-        echo $c
+    if test $want_dirs -eq 1
+        __fish_complete_directories $cur
     end
 end
 

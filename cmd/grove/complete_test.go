@@ -75,9 +75,10 @@ func TestCompleteOutsideProject(t *testing.T) {
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git not available")
 	}
+	// `grove DIR` works anywhere, so paths are still on offer; branches are not.
 	out := captureComplete(t, t.TempDir(), "sa")
-	if out != "" {
-		t.Fatalf("expected no output outside grove project, got %q", out)
+	if out != pathSentinel {
+		t.Fatalf("expected only %q outside a grove project, got %q", pathSentinel, out)
 	}
 }
 
@@ -128,14 +129,64 @@ func TestCompleteFromFlag(t *testing.T) {
 	}
 }
 
-func TestCompleteLaunchFilesSentinel(t *testing.T) {
+func TestCompleteLaunchPathSentinel(t *testing.T) {
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git not available")
 	}
 	_, wt := setupCompleteProject(t)
 	out := captureComplete(t, wt, "launch", "")
-	if out != filesSentinel {
-		t.Fatalf("expected %q, got %q", filesSentinel, out)
+	if out != pathSentinel {
+		t.Fatalf("expected %q, got %q", pathSentinel, out)
+	}
+}
+
+func TestCompleteBareWordOffersPaths(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+	_, wt := setupCompleteProject(t)
+	out := captureComplete(t, wt, "../../")
+	if out != pathSentinel {
+		t.Fatalf("expected %q, got %q", pathSentinel, out)
+	}
+}
+
+func TestCompleteBareWordOffersPathsAlongsideBranches(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+	_, wt := setupCompleteProject(t)
+	lines := strings.Split(captureComplete(t, wt, "salsa"), "\n")
+	if lines[0] != pathSentinel {
+		t.Fatalf("expected %q first, got %q", pathSentinel, lines)
+	}
+	if !strings.Contains(strings.Join(lines, "\n"), "salsa-feature") {
+		t.Fatalf("expected salsa-feature in %q", lines)
+	}
+}
+
+func TestCompleteBareEmptyWordOmitsPaths(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+	_, wt := setupCompleteProject(t)
+	out := captureComplete(t, wt, "")
+	if strings.Contains(out, pathSentinel) {
+		t.Fatalf("did not expect %q for the empty word, got %q", pathSentinel, out)
+	}
+	if !strings.Contains(out, "open") {
+		t.Fatalf("expected subcommands in %q", out)
+	}
+}
+
+func TestCompleteBranchArgOmitsPaths(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+	_, wt := setupCompleteProject(t)
+	out := captureComplete(t, wt, "open", "../")
+	if out != "" {
+		t.Fatalf("expected no candidates for a path after open, got %q", out)
 	}
 }
 

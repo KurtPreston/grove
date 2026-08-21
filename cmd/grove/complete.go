@@ -8,7 +8,11 @@ import (
 	"grove/internal/project"
 )
 
-const filesSentinel = "__grove_files__"
+// pathSentinel asks the completion script to add directory candidates for the
+// word being completed. Its value predates path completion on the bare
+// `grove WORD` form, and is kept so a newer binary still drives an already
+// installed completion script.
+const pathSentinel = "__grove_files__"
 
 var completeSubcommands = []string{
 	"clone", "open", "switch", "sw", "path", "tmux", "list", "ls",
@@ -21,8 +25,8 @@ var branchArgIndex = map[string]int{
 	"open": 0, "switch": 0, "sw": 0, "path": 0, "rm": 0, "remove": 0, "color": 0,
 }
 
-// fileArgIndex maps a subcommand to positional indices that expect a filesystem path.
-var fileArgIndex = map[string][]int{
+// pathArgIndex maps a subcommand to positional indices that expect a directory.
+var pathArgIndex = map[string][]int{
 	"launch": {0}, "here": {0}, "clone": {1},
 }
 
@@ -63,6 +67,13 @@ func cmdComplete(args []string) {
 
 	cmd, argIdx, _ := parseCompleteWords(prior)
 	if cmd == "" {
+		// A bare word may be a subcommand, a branch, or a directory (see
+		// existingDir in main.go), so offer all three at once. The empty word
+		// is the exception: listing every directory next to every branch is
+		// noise before the user has narrowed anything down.
+		if cur != "" {
+			fmt.Println(pathSentinel)
+		}
 		var candidates []string
 		candidates = append(candidates, completeSubcommands...)
 		candidates = append(candidates, completeBranches("")...)
@@ -75,9 +86,9 @@ func cmdComplete(args []string) {
 		return
 	}
 
-	for _, idx := range fileArgIndex[cmd] {
+	for _, idx := range pathArgIndex[cmd] {
 		if argIdx == idx {
-			fmt.Println(filesSentinel)
+			fmt.Println(pathSentinel)
 			return
 		}
 	}

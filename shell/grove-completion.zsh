@@ -21,13 +21,24 @@ _grove() {
     return
   fi
 
-  local -a replies
-  replies=("${(@f)$(command grove __complete "${words[@]:1}" 2>/dev/null)}")
-  if (( ${#replies} == 1 )) && [[ "${replies[1]}" == "__grove_files__" ]]; then
-    _files
-    return
-  fi
-  compadd -a replies
+  local -a raw replies
+  raw=("${(@f)$(command grove __complete "${words[@]:1}" 2>/dev/null)}")
+
+  # A __grove_files__ line means "also complete directories here"; it can arrive
+  # on its own or mixed in with branch and subcommand candidates.
+  local want_dirs=0 reply
+  for reply in "${raw[@]}"; do
+    if [[ "$reply" == "__grove_files__" ]]; then
+      want_dirs=1
+    elif [[ -n "$reply" ]]; then
+      replies+=("$reply")
+    fi
+  done
+
+  local ret=1
+  (( ${#replies} )) && { compadd -a replies && ret=0 }
+  (( want_dirs )) && { _files -/ && ret=0 }
+  return ret
 }
 
 if (( $+functions[compdef] )); then
