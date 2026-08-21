@@ -22,7 +22,7 @@ _grove() {
   fi
 
   local -a replies
-  replies=("${(@f)$(command grove __complete "${words[@]:2}" 2>/dev/null)}")
+  replies=("${(@f)$(command grove __complete "${words[@]:1}" 2>/dev/null)}")
   if (( ${#replies} == 1 )) && [[ "${replies[1]}" == "__grove_files__" ]]; then
     _files
     return
