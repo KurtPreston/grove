@@ -17,13 +17,21 @@ sharedir="${XDG_DATA_HOME:-$HOME/.local/share}/grove"
 
 die() { echo "error: $*" >&2; exit 1; }
 
-# Prefer curl, fall back to wget. fetch URL -> stdout.
+# Prefer curl, fall back to wget. fetch URL -> stdout, fetch_to URL FILE, and
+# resolve URL -> the URL a redirect points at.
 if command -v curl >/dev/null 2>&1; then
   fetch() { curl -fsSL "$1"; }
   fetch_to() { curl -fsSL "$1" -o "$2"; }
+  resolve() { curl -fsSLI -o /dev/null -w '%{url_effective}' "$1"; }
 elif command -v wget >/dev/null 2>&1; then
   fetch() { wget -qO- "$1"; }
   fetch_to() { wget -qO "$2" "$1"; }
+  # wget exits non-zero on the redirect it was told not to follow, so ignore the
+  # status and judge by whether a Location came back.
+  resolve() {
+    wget -q --max-redirect=0 -S -O /dev/null "$1" 2>&1 |
+      awk 'tolower($1) == "location:" { print $2; exit }'
+  }
 else
   die "need curl or wget to download grove"
 fi
@@ -43,13 +51,15 @@ case "$arch" in
   *) die "unsupported architecture: $arch (grove ships amd64 and arm64 builds)" ;;
 esac
 
-# Resolve the release tag to install. Capture the response before parsing so the
-# curl pipe is never closed early (which would trip SIGPIPE under pipefail).
+# Resolve the release tag to install from the redirect /releases/latest serves to
+# /releases/tag/<tag>. Deliberately not api.github.com: unauthenticated API calls
+# are capped at 60 per hour per source IP, so behind a shared NAT the budget is
+# spent by unrelated traffic and this 403s for everyone on it. A repo with no
+# releases redirects to /releases instead, leaving no tag to match.
 tag="${GROVE_VERSION:-}"
 if [ -z "$tag" ]; then
-  resp="$(fetch "https://api.github.com/repos/$repo/releases/latest")" \
-    || die "could not query the latest release of $repo (set GROVE_VERSION to pin one)"
-  tag="$(printf '%s\n' "$resp" | grep '"tag_name"' | head -n1 | sed -E 's/.*"tag_name": *"([^"]+)".*/\1/')"
+  url="$(resolve "https://github.com/$repo/releases/latest" || true)"
+  tag="$(printf '%s\n' "$url" | sed -n 's#.*/releases/tag/\([^/?]*\).*#\1#p')"
   [ -n "$tag" ] || die "could not determine the latest release of $repo (set GROVE_VERSION to pin one)"
 fi
 
