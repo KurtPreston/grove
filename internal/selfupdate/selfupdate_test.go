@@ -46,6 +46,37 @@ func TestSameVersion(t *testing.T) {
 	}
 }
 
+func TestTagFromReleaseURL(t *testing.T) {
+	tests := map[string]string{
+		"https://github.com/OWNER/REPO/releases/tag/v0.5.9": "v0.5.9",
+		"/OWNER/REPO/releases/tag/v0.5.9":                   "v0.5.9",
+		"https://github.com/OWNER/REPO/releases/tag/v1.0/":  "v1.0",
+		// A repo with no releases redirects to the releases index, not a tag.
+		"https://github.com/OWNER/REPO/releases": "",
+		"":                                       "",
+	}
+	for in, want := range tests {
+		if got := tagFromReleaseURL(in); got != want {
+			t.Errorf("tagFromReleaseURL(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+// TestClientLatestTagNoReleases covers the redirect landing on the releases
+// index: there is no tag to install, and we must say so rather than trying to
+// download from a bogus URL.
+func TestClientLatestTagNoReleases(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "/"+testRepo+"/releases", http.StatusFound)
+	}))
+	defer srv.Close()
+
+	c := testClient(srv, filepath.Join(t.TempDir(), "grove"))
+	if _, err := c.latestTag(); err == nil {
+		t.Fatal("expected an error when the repo has no tagged release")
+	}
+}
+
 func TestChecksumFor(t *testing.T) {
 	sums := "abc123  grove_linux_amd64.tar.gz\n" +
 		"def456 *grove_darwin_arm64.tar.gz\n" +
@@ -244,24 +275,27 @@ const testRepo = "OWNER/REPO"
 func testClient(srv *httptest.Server, target string) *client {
 	return &client{
 		repo:       testRepo,
-		apiBase:    srv.URL,
 		dlBase:     srv.URL,
 		http:       srv.Client(),
 		binaryPath: target,
 	}
 }
 
-// releaseServer stands up a fake GitHub serving one release: the latest-release
-// metadata, the platform archive, and its checksums.txt.
+// releaseServer stands up a fake GitHub serving one release: the /releases/latest
+// redirect that names the tag, the platform archive, and its checksums.txt.
 func releaseServer(t *testing.T, tag string, archive []byte, sum string) *httptest.Server {
 	t.Helper()
 	asset := assetName()
+	latest := "/" + testRepo + "/releases/latest"
 	routes := map[string][]byte{
-		"/repos/" + testRepo + "/releases/latest":                       []byte(`{"tag_name":"` + tag + `"}`),
 		"/" + testRepo + "/releases/download/" + tag + "/" + asset:      archive,
 		"/" + testRepo + "/releases/download/" + tag + "/checksums.txt": []byte(sum + "  " + asset + "\n"),
 	}
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == latest {
+			http.Redirect(w, r, "/"+testRepo+"/releases/tag/"+tag, http.StatusFound)
+			return
+		}
 		body, ok := routes[r.URL.Path]
 		if !ok {
 			http.NotFound(w, r)

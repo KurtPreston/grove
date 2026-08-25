@@ -17,7 +17,6 @@ import (
 	"compress/gzip"
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -41,12 +40,9 @@ const binaryName = "grove"
 
 var shellFiles = []string{"grove.bash", "grove.fish", "grove-completion.bash", "grove-completion.zsh", "grove-completion.fish"}
 
-// Base URLs are package vars (not consts) so tests can point the flow at an
-// httptest server instead of the real GitHub.
-var (
-	defaultAPIBase      = "https://api.github.com"
-	defaultDownloadBase = "https://github.com"
-)
+// defaultDownloadBase is a package var (not a const) so tests can point the flow
+// at an httptest server instead of the real GitHub.
+var defaultDownloadBase = "https://github.com"
 
 // Options configures an update run. The zero value updates the running binary to
 // the latest release of DefaultRepo; env vars fill in anything left empty.
@@ -76,10 +72,9 @@ func Run(opts Options) (Result, error) {
 		opts.TargetVersion = os.Getenv("GROVE_VERSION")
 	}
 	c := &client{
-		repo:    opts.Repo,
-		apiBase: defaultAPIBase,
-		dlBase:  defaultDownloadBase,
-		http:    &http.Client{Timeout: 5 * time.Minute},
+		repo:   opts.Repo,
+		dlBase: defaultDownloadBase,
+		http:   &http.Client{Timeout: 5 * time.Minute},
 	}
 	return c.run(opts)
 }
@@ -89,7 +84,6 @@ func Run(opts Options) (Result, error) {
 // clobbers the test runner).
 type client struct {
 	repo       string
-	apiBase    string
 	dlBase     string
 	http       *http.Client
 	binaryPath string
@@ -144,28 +138,40 @@ func (c *client) run(opts Options) (Result, error) {
 	return res, nil
 }
 
-// latestTag returns the tag_name of the repo's latest GitHub release.
+// latestTag returns the tag of the repo's latest GitHub release, read from the
+// redirect that /releases/latest serves to /releases/tag/<tag>.
+//
+// This deliberately avoids api.github.com: unauthenticated API calls are capped
+// at 60 per hour per source IP, so behind a shared NAT the budget is spent by
+// other traffic and every `grove update` fails with a 403 that looks like a
+// permissions problem. The redirect carries no such cap, and it lives on the
+// host we already have to reach for the download itself.
 func (c *client) latestTag() (string, error) {
-	url := c.apiBase + "/repos/" + c.repo + "/releases/latest"
-	body, err := c.get(url, "application/vnd.github+json")
+	loc, err := c.redirect(c.dlBase + "/" + c.repo + "/releases/latest")
 	if err != nil {
 		return "", fmt.Errorf("could not resolve the latest release of %s (set GROVE_VERSION to pin one): %w", c.repo, err)
 	}
-	var rel struct {
-		TagName string `json:"tag_name"`
-	}
-	if err := json.Unmarshal(body, &rel); err != nil {
-		return "", fmt.Errorf("could not parse the latest release of %s: %w", c.repo, err)
-	}
-	if rel.TagName == "" {
+	tag := tagFromReleaseURL(loc)
+	if tag == "" {
 		return "", fmt.Errorf("no tagged release found for %s (set GROVE_VERSION to pin one)", c.repo)
 	}
-	return rel.TagName, nil
+	return tag, nil
+}
+
+// tagFromReleaseURL extracts the tag from a .../releases/tag/<tag> URL. A repo
+// with no releases redirects to .../releases instead, which yields "".
+func tagFromReleaseURL(loc string) string {
+	const marker = "/releases/tag/"
+	i := strings.LastIndex(loc, marker)
+	if i < 0 {
+		return ""
+	}
+	return strings.Trim(loc[i+len(marker):], "/")
 }
 
 // fetchArchive downloads the per-platform release archive for tag.
 func (c *client) fetchArchive(tag, archive string) ([]byte, error) {
-	data, err := c.get(c.releaseURL(tag, archive), "")
+	data, err := c.get(c.releaseURL(tag, archive))
 	if err != nil {
 		return nil, fmt.Errorf("could not download %s for %s: %w", archive, tag, err)
 	}
@@ -176,7 +182,7 @@ func (c *client) fetchArchive(tag, archive string) ([]byte, error) {
 // best effort (matching install.sh): a missing checksums file or entry warns and
 // proceeds, but a present-and-mismatched checksum is fatal.
 func (c *client) verify(tag, archive string, data []byte) error {
-	sums, err := c.get(c.releaseURL(tag, "checksums.txt"), "")
+	sums, err := c.get(c.releaseURL(tag, "checksums.txt"))
 	if err != nil {
 		ui.Warn("no checksums.txt for " + tag + "; skipping verification.")
 		return nil
@@ -198,17 +204,8 @@ func (c *client) releaseURL(tag, file string) string {
 }
 
 // get performs a GET and returns the body, treating any non-200 as an error.
-// GitHub rejects requests without a User-Agent, so one is always set.
-func (c *client) get(url, accept string) ([]byte, error) {
-	req, err := http.NewRequest(http.MethodGet, url, nil)
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("User-Agent", "grove-selfupdate")
-	if accept != "" {
-		req.Header.Set("Accept", accept)
-	}
-	resp, err := c.http.Do(req)
+func (c *client) get(url string) ([]byte, error) {
+	resp, err := c.do(url, c.http)
 	if err != nil {
 		return nil, err
 	}
@@ -217,6 +214,34 @@ func (c *client) get(url, accept string) ([]byte, error) {
 		return nil, fmt.Errorf("GET %s: %s", url, resp.Status)
 	}
 	return io.ReadAll(resp.Body)
+}
+
+// redirect performs a GET that stops at the first response and returns the
+// Location it pointed at, so a redirect is data rather than something to follow.
+func (c *client) redirect(url string) (string, error) {
+	noFollow := *c.http
+	noFollow.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+	resp, err := c.do(url, &noFollow)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	loc := resp.Header.Get("Location")
+	if loc == "" {
+		return "", fmt.Errorf("GET %s: expected a redirect, got %s", url, resp.Status)
+	}
+	return loc, nil
+}
+
+// do issues the GET. GitHub rejects requests without a User-Agent, so one is
+// always set.
+func (c *client) do(url string, hc *http.Client) (*http.Response, error) {
+	req, err := http.NewRequest(http.MethodGet, url, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("User-Agent", "grove-selfupdate")
+	return hc.Do(req)
 }
 
 // targetBinary is the executable to replace: the injected path when set (tests),
