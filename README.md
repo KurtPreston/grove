@@ -135,7 +135,7 @@ for when and why to enable the recipe.
 | `grove path BRANCH` | Resolve (creating if needed) BRANCH's worktree and print its absolute path to stdout |
 | `grove tmux` | Attach the project's tmux session, building a window for every worktree |
 | `grove list` / `ls [-t] [--porcelain]` | List worktrees with each branch's last commit time; `-t` orders newest first; `--porcelain` prints `branch<TAB>path` |
-| `grove prune [--dry-run]` | Remove worktrees whose branches are merged, including squash/rebase merges (keeps branch refs); never-pushed branches are left alone. Confirming at the prompt discards any local changes in those worktrees. `--dry-run`/`-n` lists candidates without removing anything |
+| `grove prune [--dry-run] [--force]` | Remove worktrees whose branches are merged, including squash/rebase merges (keeps branch refs); never-pushed branches are left alone. A worktree with local changes is kept unless `--force`/`-f` is passed. `--dry-run`/`-n` lists candidates without removing anything |
 | `grove rm BRANCH [--force]` | Remove a single worktree (keeps the branch ref); `--force` discards local changes |
 | `grove color BRANCH` | Print the deterministic color for a branch |
 | `grove launch` / `here [DIR]` | Run the user-level recipes for `DIR` (or cwd) without a worktree (see [Launching any folder](#launching-any-folder)) |
@@ -149,12 +149,13 @@ listing. `grove ls` drops its color when stdout is not a terminal; use
 
 `grove rm`/`grove prune` remove a worktree even when it contains submodules —
 plain `git worktree remove` refuses those, so grove clears git's submodule guard
-for you. For `grove rm`, a worktree with local changes (including modified
-submodule content) is left in place; pass `grove rm BRANCH --force` to discard
-those changes and remove it anyway. `grove prune` lists its candidates (flagging
-any with local changes) and, once you confirm at the prompt, discards those
-changes and removes them. The branch ref is always kept, so nothing committed is
-lost.
+for you. Both leave a worktree with local changes (including modified submodule
+content) in place: `grove rm BRANCH` tells you to re-run with `--force`, and
+`grove prune` lists the branch under "kept because of local changes" and moves
+on. Pass `--force` to either one to discard those changes and remove the
+worktree anyway. The branch ref is always kept, so nothing committed is ever
+lost — but uncommitted work has no ref to survive on, and untracked files are not
+recoverable from git at all, which is why `--force` is opt-in.
 
 ### Choosing the base branch for new branches
 
@@ -534,9 +535,8 @@ is non-fatal: grove warns and uses the defaults.
 
 ### Prune detection
 
-`grove prune` keeps branch refs; candidates with local changes are flagged in
-the list, and confirming removal discards those changes. A worktree is a
-candidate when its branch is:
+`grove prune` keeps branch refs, and keeps any candidate worktree that has local
+changes unless you pass `--force`. A worktree is a candidate when its branch is:
 
 - **merged** — an ancestor of `origin/<default>` (`git branch --merged`);
 - **squashed** — its net diff already exists in `origin/<default>`, detected via

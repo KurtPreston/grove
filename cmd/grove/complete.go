@@ -36,7 +36,7 @@ var completeFlags = map[string][]string{
 	"switch": {"--force", "-f", "--from"},
 	"sw":     {"--force", "-f", "--from"},
 	"path":   {"--from"},
-	"prune":  {"--dry-run", "-n"},
+	"prune":  {"--dry-run", "-n", "--force", "-f"},
 	"rm":     {"--force", "-f"},
 	"remove": {"--force", "-f"},
 	"list":   {"--porcelain", "-t", "--time"},

@@ -145,6 +145,41 @@ func TestPruneReason(t *testing.T) {
 	}
 }
 
+// TestSplitPruneCandidates pins the safety rule that a merged-but-dirty worktree
+// is kept: prune preserves the branch ref, but uncommitted and untracked work
+// would be gone for good.
+func TestSplitPruneCandidates(t *testing.T) {
+	cands := []pruneCandidate{
+		{branch: "clean-a", reason: "merged"},
+		{branch: "dirty", reason: "merged", dirty: true},
+		{branch: "clean-b", reason: "squashed"},
+	}
+
+	remove, kept := splitPruneCandidates(cands, false)
+	if got := branchList(remove); got != "clean-a,clean-b" {
+		t.Errorf("remove = %q, want clean-a,clean-b", got)
+	}
+	if got := branchList(kept); got != "dirty" {
+		t.Errorf("kept = %q, want dirty", got)
+	}
+
+	remove, kept = splitPruneCandidates(cands, true)
+	if got := branchList(remove); got != "clean-a,dirty,clean-b" {
+		t.Errorf("forced remove = %q, want clean-a,dirty,clean-b", got)
+	}
+	if len(kept) != 0 {
+		t.Errorf("--force should keep nothing, got %q", branchList(kept))
+	}
+}
+
+func branchList(cands []pruneCandidate) string {
+	names := make([]string, len(cands))
+	for i, c := range cands {
+		names[i] = c.branch
+	}
+	return strings.Join(names, ",")
+}
+
 func TestFormatCommitAge(t *testing.T) {
 	now := time.Date(2026, 8, 18, 15, 0, 0, 0, time.UTC)
 	tests := []struct {

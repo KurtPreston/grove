@@ -463,6 +463,7 @@ func printRow(p *project.Project, session string, w project.Worktree, age string
 }
 
 func cmdPrune(args []string) {
+	args, force := popForce(args)
 	dry := false
 	for _, a := range args {
 		if a == "--dry-run" || a == "-n" {
@@ -486,34 +487,38 @@ func cmdPrune(args []string) {
 	if cfg.ForgeEnabled() {
 		forgeMerged = forgeMergedBranches(p, cfg)
 	}
-	type cand struct {
-		branch, path, reason string
-		dirty                bool
-	}
-	var candidates []cand
-	dirtyCount := 0
+	var candidates []pruneCandidate
 	for _, w := range wts {
 		if r := pruneReason(p, w, def, cwd, cfg, forgeMerged, partial); r != "" {
-			dirty := !p.WorktreeClean(w.Path)
-			if dirty {
-				dirtyCount++
-			}
-			candidates = append(candidates, cand{w.Branch, w.Path, r, dirty})
+			candidates = append(candidates, pruneCandidate{w.Branch, w.Path, r, !p.WorktreeClean(w.Path)})
 		}
 	}
 	if len(candidates) == 0 {
 		ui.Info("Nothing to prune.")
 		return
 	}
+	remove, kept := splitPruneCandidates(candidates, force)
+
+	if len(kept) > 0 {
+		ui.Warn("Merged, but kept because of local changes (commit or stash them, or re-run with --force to discard):")
+		for _, c := range kept {
+			printPruneCandidate(c, ui.Yellow+"local changes"+ui.Reset)
+		}
+	}
+	if len(remove) == 0 {
+		ui.Info("Nothing to prune.")
+		return
+	}
 
 	ui.Log("The following worktrees are merged (branch refs are kept):")
-	for _, c := range candidates {
-		fmt.Fprintf(os.Stderr, "  %s %-28s %s%s%s",
-			color.Swatch(color.ForBranch(c.branch)), c.branch, ui.Dim, c.reason, ui.Reset)
+	dirtyCount := 0
+	for _, c := range remove {
+		note := ""
 		if c.dirty {
-			fmt.Fprintf(os.Stderr, " %slocal changes will be discarded%s", ui.Yellow, ui.Reset)
+			dirtyCount++
+			note = ui.Yellow + "local changes will be discarded" + ui.Reset
 		}
-		fmt.Fprintln(os.Stderr)
+		printPruneCandidate(c, note)
 	}
 	if dry {
 		ui.Info("Dry run; no worktrees removed.")
@@ -530,12 +535,13 @@ func cmdPrune(args []string) {
 	}
 
 	session := project.Sanitize(p.Name())
-	for _, c := range candidates {
+	for _, c := range remove {
 		if tmux.Has() {
 			tmux.KillWindow(session, project.Sanitize(c.branch))
 		}
-		// The user confirmed removal at the prompt, so force past any local
-		// changes; the branch ref is kept regardless.
+		// Anything reaching this loop is either clean or was opted in with
+		// --force and confirmed at the prompt, so force past git's submodule
+		// guard; the branch ref is kept regardless.
 		switch err := p.RemoveWorktree(c.path, true); {
 		case err != nil:
 			ui.Warn(fmt.Sprintf("Could not remove %s: %v", c.path, err))
@@ -544,6 +550,40 @@ func cmdPrune(args []string) {
 		}
 	}
 	_ = project.Git(p.Base, "worktree", "prune")
+}
+
+// pruneCandidate is a worktree prune classified as merged, plus the working-tree
+// state that decides whether removing it is safe.
+type pruneCandidate struct {
+	branch, path, reason string
+	dirty                bool
+}
+
+// splitPruneCandidates separates the candidates prune removes from the ones it
+// keeps. A dirty worktree is kept unless force was given: prune keeps the branch
+// ref, so nothing committed is ever lost, but uncommitted work has no ref to
+// survive on and untracked files are not recoverable from git at all. --force
+// mirrors `grove rm --force` and opts those worktrees back in.
+func splitPruneCandidates(cands []pruneCandidate, force bool) (remove, kept []pruneCandidate) {
+	for _, c := range cands {
+		if c.dirty && !force {
+			kept = append(kept, c)
+		} else {
+			remove = append(remove, c)
+		}
+	}
+	return remove, kept
+}
+
+// printPruneCandidate writes one listing row: swatch, branch, prune reason, and
+// an optional trailing note about the worktree's local changes.
+func printPruneCandidate(c pruneCandidate, note string) {
+	fmt.Fprintf(os.Stderr, "  %s %-28s %s%s%s",
+		color.Swatch(color.ForBranch(c.branch)), c.branch, ui.Dim, c.reason, ui.Reset)
+	if note != "" {
+		fmt.Fprintf(os.Stderr, " %s", note)
+	}
+	fmt.Fprintln(os.Stderr)
 }
 
 // pruneReason returns why a worktree is a prune candidate ("merged", "squashed",
@@ -1060,7 +1100,8 @@ Usage:
   grove path BRANCH              Resolve (creating if needed) BRANCH's worktree; print its path
   grove tmux                     Attach the project session, building a window per worktree
   grove list | ls [-t] [--porcelain]  List worktrees with last commit time; -t newest first; --porcelain prints branch<TAB>path
-  grove prune                    Remove merged worktrees (keeps branch refs)
+  grove prune [--dry-run] [--force]   Remove merged worktrees (keeps branch refs); worktrees with local
+                                 changes are kept unless --force discards them
   grove rm BRANCH [--force]      Remove a single worktree (keeps branch ref); --force discards local changes
   grove color BRANCH             Print the deterministic color for BRANCH
   grove launch | here [DIR]      Run user-level recipes for DIR (or cwd) without a worktree
