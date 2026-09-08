@@ -129,7 +129,7 @@ for when and why to enable the recipe.
 |---------|-------------|
 | `grove clone GIT_URL [FOLDER]` | Clone a repo as a bare `.base` plus a worktree for the default branch under `FOLDER` in the current directory, and seed a starter (commented) `grove.jsonc` |
 | `grove BRANCH [--from REF]` | Switch to (or create) BRANCH's worktree and run the hooks in `grove.json`. When BRANCH is new, `beforeCreateBranch` hooks can abort creation, and `--from REF` bases it off REF (see [Choosing the base branch](#choosing-the-base-branch-for-new-branches)) |
-| `grove DIR` | When the argument is an existing directory (e.g. `grove .` or `grove ~/Code/slakkr`), run the user-level recipes for it — equivalent to `cd DIR && grove here` (see [Launching any folder](#launching-any-folder)). A directory path takes precedence over the branch interpretation |
+| `grove DIR` | When the argument is an existing directory (e.g. `grove .` or `grove ~/Code/slakkr`), run its `onOpen` recipes in place — equivalent to `cd DIR && grove here` (see [Launching any folder](#launching-any-folder)). A directory path takes precedence over the branch interpretation |
 | `grove open [BRANCH] [TYPES] [--force]` | Open BRANCH (or the current worktree's branch if omitted/`.`); `TYPES` (comma-separated) filters the configured hooks to those recipe types; `--force` re-runs the `afterFirstOpen` bucket |
 | `grove switch [BRANCH]` | Like a bare BRANCH; with no branch and `fzf` installed, opens a picker |
 | `grove path BRANCH` | Resolve (creating if needed) BRANCH's worktree and print its absolute path to stdout |
@@ -138,7 +138,7 @@ for when and why to enable the recipe.
 | `grove prune [--dry-run] [--force]` | Remove worktrees whose branches are merged, including squash/rebase merges (keeps branch refs); never-pushed branches are left alone. A worktree with local changes is kept unless `--force`/`-f` is passed. `--dry-run`/`-n` lists candidates without removing anything |
 | `grove rm BRANCH [--force]` | Remove a single worktree (keeps the branch ref); `--force` discards local changes |
 | `grove color BRANCH` | Print the deterministic color for a branch |
-| `grove launch` / `here [DIR]` | Run the user-level recipes for `DIR` (or cwd) without a worktree (see [Launching any folder](#launching-any-folder)) |
+| `grove launch` / `here [DIR]` | Run the `onOpen` recipes for `DIR` (or cwd) without a worktree — from the project's `grove.json` inside a grove project, otherwise from the user-level config (see [Launching any folder](#launching-any-folder)) |
 | `grove update [--force]` | Update grove in place to the latest published release (downloads, verifies, and swaps the binary); `--force` reinstalls even when already current (see [Updating](#updating)) |
 | `grove help` | Show help |
 
@@ -466,8 +466,14 @@ worktree is created, and your shell is not moved unless you add a
 
 Notes:
 
-- **No default hooks are assumed.** With no user config present, the launch is a
-  hard error pointing you at the config path — grove never invents behavior.
+- **The user-level config only applies outside grove projects.** When the
+  directory sits under a grove project (a `.base` exists above it), that
+  project's `grove.json` supplies the `onOpen` hooks and grove never reads the
+  user-level file — so `grove .` in a worktree works even with no user config
+  at all.
+- **No default hooks are assumed.** For a directory outside every grove project,
+  a missing (or unreadable, or malformed) user config is a hard error naming the
+  file and the problem — grove never invents behavior.
 - The webhook sends whatever you put in `params` (with env substitution) to
   wsm, so the dedicated virtual-desktop view is handled on the workstation.
 - Theming a *remote* Cursor window relies on writing the folder's
@@ -577,9 +583,10 @@ shell integration sets so the opt-in
 move your shell; it is not user configuration.
 
 A separate **user-level** config at `~/.config/grove/config.json` (honoring
-`$XDG_CONFIG_HOME`) drives `grove launch` for folders that are not grove
-projects. It reuses the `hooks` shape above (only `onOpen` applies) but has
-**no defaults** — see [Launching any folder](#launching-any-folder).
+`$XDG_CONFIG_HOME`) drives `grove launch` for folders that are **not** grove
+projects; inside a project the project's own `grove.json` is used instead. It
+reuses the `hooks` shape above (only `onOpen` applies) but has **no defaults** —
+see [Launching any folder](#launching-any-folder).
 
 ## tmux theming
 

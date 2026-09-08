@@ -300,35 +300,64 @@ func UserConfigPath() (string, error) {
 	return filepath.Join(dir, "config.json"), nil
 }
 
+// UserConfigError reports why the user-level config could not be used. It names
+// the file grove tried and states the problem in words fit for an error message,
+// so the launch flow can point at a specific file to fix instead of a generic
+// "not configured".
+type UserConfigError struct {
+	// Path is the file grove tried: the one that exists but failed, or the
+	// canonical config.json path when nothing exists.
+	Path string
+	// Problem completes the sentence "the file was ..." - e.g. "not found".
+	Problem string
+	// Err is the underlying os/json failure, nil when the file is simply absent.
+	Err error
+}
+
+func (e *UserConfigError) Error() string {
+	msg := e.Path + " was " + e.Problem
+	if e.Err != nil {
+		msg += ": " + e.Err.Error()
+	}
+	return msg
+}
+
+func (e *UserConfigError) Unwrap() error { return e.Err }
+
 // LoadUser reads the user-level config, preferring config.jsonc over
 // config.json (see UserConfigPath). Unlike Load, it does NOT fall back to
 // Defaults(): outside a grove project there is no sensible implicit recipe, so
-// a missing file yields found=false and the caller decides what to do. An
-// unreadable or invalid file is reported via err (found=true).
-func LoadUser() (cfg Config, found bool, err error) {
+// every failure - missing, unreadable, or invalid - is an error, reported as a
+// *UserConfigError naming the file and the problem.
+func LoadUser() (cfg Config, err error) {
 	dir, err := userConfigDir()
 	if err != nil {
-		return Config{}, false, err
+		return Config{}, &UserConfigError{
+			Path:    filepath.Join("~", ".config", "grove", "config.json"),
+			Problem: "not locatable (no home directory)",
+			Err:     err,
+		}
 	}
+	canonical := filepath.Join(dir, "config.json")
 	b, path, found, err := readConfig([]string{
 		filepath.Join(dir, "config.jsonc"),
-		filepath.Join(dir, "config.json"),
+		canonical,
 	})
 	if err != nil {
-		return Config{}, true, err
+		return Config{}, &UserConfigError{Path: path, Problem: "not readable", Err: err}
 	}
 	if !found {
-		return Config{}, false, nil
+		return Config{}, &UserConfigError{Path: canonical, Problem: "not found"}
 	}
 	if err := json.Unmarshal(b, &cfg); err != nil {
-		return Config{}, true, err
+		return Config{}, &UserConfigError{Path: path, Problem: "not valid JSON", Err: err}
 	}
 	warnUnknownFields(b, filepath.Base(path))
 	if cfg.Hooks != nil {
 		cfg.Hooks.migrateLegacy()
 	}
 	cfg.validate()
-	return cfg, true, nil
+	return cfg, nil
 }
 
 // Seed writes a starter grove.jsonc at projectDir, but only if no config

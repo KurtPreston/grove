@@ -756,10 +756,13 @@ func displayVer(v string) string {
 	return strings.TrimPrefix(v, "v")
 }
 
-// cmdLaunch: grove launch [DIR] / grove here. Runs the user-level onOpen hooks
-// (~/.config/grove/config.json) against DIR (or cwd) without requiring a grove
-// project or creating a worktree. Used directly and as the fallback for bare
+// cmdLaunch: grove launch [DIR] / grove here. Runs onOpen hooks against DIR (or
+// cwd) without creating a worktree. Used directly and as the fallback for bare
 // grove invocations outside a grove project.
+//
+// A directory inside a grove project is configured by that project's grove.json,
+// so the user-level config (~/.config/grove/config.json) is never consulted for
+// it - only a directory outside any grove project falls back to that file.
 func cmdLaunch(args []string) {
 	dir := mustGetwd()
 	if len(args) >= 1 && args[0] != "" {
@@ -773,18 +776,47 @@ func cmdLaunch(args []string) {
 		ui.Die("not a directory: " + abs)
 	}
 
-	cfg, found, err := config.LoadUser()
-	if err != nil {
-		ui.Warn("user config: " + err.Error() + "; ignoring recipes.")
-	}
-	if !found {
-		path, _ := config.UserConfigPath()
-		ui.Die("no user hooks configured; create " + path +
-			` with a "hooks": {"onOpen": [...]} object (e.g. vscode-color-config, webhook).`)
+	if root, ok := project.FindRoot(abs); ok {
+		launchInProject(root, abs)
+		return
 	}
 
-	name := filepath.Base(abs)
-	recipe.Run(cfg.OnOpen(), buildLaunchContext(name, abs))
+	cfg, err := config.LoadUser()
+	if err != nil {
+		ui.Die(noUserConfigMessage(abs, err))
+	}
+	recipe.Run(cfg.OnOpen(), buildLaunchContext(filepath.Base(abs), abs))
+}
+
+// launchInProject runs the project's onOpen hooks for a directory that already
+// lives under a grove project root, with the same context a switch/open would
+// build (branch, project, base) so project hooks see the variables they expect.
+func launchInProject(root, abs string) {
+	p := &project.Project{Base: filepath.Join(root, ".base"), Dir: root}
+	branch, ok := currentBranch(abs)
+	if !ok {
+		branch = filepath.Base(abs)
+	}
+	recipe.Run(loadCfg(p).OnOpen(), buildContext(p, branch, abs, false))
+}
+
+// noUserConfigMessage explains a failed user-level config load for dir, naming
+// the file grove tried and what was wrong with it. dir is outside every grove
+// project here (cmdLaunch checked), which is the reason grove looked at the
+// user-level file at all - so say that first: a user who expected their project
+// config to apply needs to know grove never saw one.
+func noUserConfigMessage(dir string, err error) string {
+	var cfgErr *config.UserConfigError
+	if !errors.As(err, &cfgErr) {
+		return dir + " is not a grove project, and grove could not read its user-level config: " + err.Error()
+	}
+	msg := dir + " is not a grove project. Attempted to use " + cfgErr.Path +
+		" for default behavior, but the file was " + cfgErr.Problem + "."
+	if cfgErr.Err != nil {
+		msg += "\n  " + cfgErr.Err.Error()
+	}
+	return msg + "\n  It needs a " + `"hooks": {"onOpen": [...]}` +
+		" object (e.g. vscode-color-config, webhook)."
 }
 
 // ---------------------------------------------------------------------------
