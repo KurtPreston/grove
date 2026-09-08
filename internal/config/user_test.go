@@ -87,6 +87,37 @@ func TestLoadUserUnreadableFile(t *testing.T) {
 	}
 }
 
+func TestLoadUserReadsGroveJSON(t *testing.T) {
+	dir := userConfigHome(t)
+	// The user-level file has the same shape as a project's grove.json, so that
+	// name is accepted here too.
+	writeFile(t, filepath.Join(dir, "grove.json"), `{"hooks": {"onOpen": [{"type": "tmux"}]}}`)
+
+	cfg, err := LoadUser()
+	if err != nil {
+		t.Fatalf("LoadUser: %v", err)
+	}
+
+	if hooks := cfg.OnOpen(); len(hooks) != 1 || hooks[0].Type != "tmux" {
+		t.Errorf("onOpen = %+v, want the single tmux recipe from grove.json", hooks)
+	}
+}
+
+func TestLoadUserPrefersConfigJSONOverGroveJSON(t *testing.T) {
+	dir := userConfigHome(t)
+	writeFile(t, filepath.Join(dir, "grove.jsonc"), `{"hooks": {"onOpen": [{"type": "tmux"}]}}`)
+	writeFile(t, filepath.Join(dir, "config.json"), `{"hooks": {"onOpen": [{"type": "vscode-color-config"}]}}`)
+
+	cfg, err := LoadUser()
+	if err != nil {
+		t.Fatalf("LoadUser: %v", err)
+	}
+
+	if hooks := cfg.OnOpen(); len(hooks) != 1 || hooks[0].Type != "vscode-color-config" {
+		t.Errorf("onOpen = %+v, want the recipe from the canonical config.json", hooks)
+	}
+}
+
 func TestLoadUserReadsConfigJSONC(t *testing.T) {
 	dir := userConfigHome(t)
 	// config.jsonc wins over config.json and may carry comments.

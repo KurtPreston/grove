@@ -788,6 +788,18 @@ func cmdLaunch(args []string) {
 	recipe.Run(cfg.OnOpen(), buildLaunchContext(filepath.Base(abs), abs))
 }
 
+// otherUserConfigNames lists the accepted user-config file names apart from the
+// canonical config.json already named in the error message.
+func otherUserConfigNames() []string {
+	var names []string
+	for _, name := range config.UserConfigNames {
+		if name != "config.json" {
+			names = append(names, name)
+		}
+	}
+	return names
+}
+
 // launchInProject runs the project's onOpen hooks for a directory that already
 // lives under a grove project root, with the same context a switch/open would
 // build (branch, project, base) so project hooks see the variables they expect.
@@ -815,8 +827,14 @@ func noUserConfigMessage(dir string, err error) string {
 	if cfgErr.Err != nil {
 		msg += "\n  " + cfgErr.Err.Error()
 	}
-	return msg + "\n  It needs a " + `"hooks": {"onOpen": [...]}` +
+	msg += "\n  It needs a " + `"hooks": {"onOpen": [...]}` +
 		" object (e.g. vscode-color-config, webhook)."
+	// Only worth listing the alternatives when there is nothing to fix: a file
+	// that exists but is broken should be fixed where it is, not renamed.
+	if cfgErr.Problem == config.ProblemNotFound {
+		msg += "\n  That directory also accepts " + strings.Join(otherUserConfigNames(), ", ") + "."
+	}
+	return msg
 }
 
 // ---------------------------------------------------------------------------

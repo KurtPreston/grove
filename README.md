@@ -444,6 +444,11 @@ a grove project, so `beforeCreateBranch`/`afterFirstOpen` never run here:
 }
 ```
 
+Because it is the same format, grove takes any of four names in that directory —
+`config.jsonc`, `config.json`, `grove.jsonc`, `grove.json`, tried in that order.
+The `.jsonc` spellings allow comments and trailing commas, exactly as in a
+project.
+
 Then, from inside a non-grove folder:
 
 ```sh
@@ -583,7 +588,8 @@ shell integration sets so the opt-in
 move your shell; it is not user configuration.
 
 A separate **user-level** config at `~/.config/grove/config.json` (honoring
-`$XDG_CONFIG_HOME`) drives `grove launch` for folders that are **not** grove
+`$XDG_CONFIG_HOME`, and also readable as `config.jsonc`, `grove.jsonc`, or
+`grove.json`) drives `grove launch` for folders that are **not** grove
 projects; inside a project the project's own `grove.json` is used instead. It
 reuses the `hooks` shape above (only `onOpen` applies) but has **no defaults** —
 see [Launching any folder](#launching-any-folder).

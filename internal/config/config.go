@@ -289,15 +289,36 @@ func userConfigDir() (string, error) {
 	return filepath.Join(dir, "grove"), nil
 }
 
+// UserConfigNames are the file names LoadUser accepts in the user-level config
+// directory, in the order it tries them. config.json is the canonical name; the
+// grove.json spellings are accepted because the file has the same shape as a
+// project's grove.json, and that is the name people reach for.
+var UserConfigNames = []string{"config.jsonc", "config.json", "grove.jsonc", "grove.json"}
+
+// ProblemNotFound is the UserConfigError.Problem used when no user-level config
+// exists at all, as opposed to one that exists but could not be used. Callers
+// match on it to tell "create a config" apart from "fix this file".
+const ProblemNotFound = "not found"
+
 // UserConfigPath returns the canonical path to grove's user-level config, used
 // by the launch flow when cwd is not inside a grove project (and in the
-// "not configured" error message). LoadUser also accepts a config.jsonc sibling.
+// "not configured" error message). LoadUser also accepts the other
+// UserConfigNames in that directory.
 func UserConfigPath() (string, error) {
 	dir, err := userConfigDir()
 	if err != nil {
 		return "", err
 	}
 	return filepath.Join(dir, "config.json"), nil
+}
+
+// userConfigCandidates lists the paths LoadUser tries, in order.
+func userConfigCandidates(dir string) []string {
+	paths := make([]string, 0, len(UserConfigNames))
+	for _, name := range UserConfigNames {
+		paths = append(paths, filepath.Join(dir, name))
+	}
+	return paths
 }
 
 // UserConfigError reports why the user-level config could not be used. It names
@@ -324,8 +345,8 @@ func (e *UserConfigError) Error() string {
 
 func (e *UserConfigError) Unwrap() error { return e.Err }
 
-// LoadUser reads the user-level config, preferring config.jsonc over
-// config.json (see UserConfigPath). Unlike Load, it does NOT fall back to
+// LoadUser reads the user-level config, taking the first of UserConfigNames
+// that exists (see UserConfigPath). Unlike Load, it does NOT fall back to
 // Defaults(): outside a grove project there is no sensible implicit recipe, so
 // every failure - missing, unreadable, or invalid - is an error, reported as a
 // *UserConfigError naming the file and the problem.
@@ -339,15 +360,12 @@ func LoadUser() (cfg Config, err error) {
 		}
 	}
 	canonical := filepath.Join(dir, "config.json")
-	b, path, found, err := readConfig([]string{
-		filepath.Join(dir, "config.jsonc"),
-		canonical,
-	})
+	b, path, found, err := readConfig(userConfigCandidates(dir))
 	if err != nil {
 		return Config{}, &UserConfigError{Path: path, Problem: "not readable", Err: err}
 	}
 	if !found {
-		return Config{}, &UserConfigError{Path: canonical, Problem: "not found"}
+		return Config{}, &UserConfigError{Path: canonical, Problem: ProblemNotFound}
 	}
 	if err := json.Unmarshal(b, &cfg); err != nil {
 		return Config{}, &UserConfigError{Path: path, Problem: "not valid JSON", Err: err}
