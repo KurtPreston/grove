@@ -36,6 +36,8 @@ import (
 	"grove/internal/selfupdate"
 	"grove/internal/tmux"
 	"grove/internal/ui"
+
+	"golang.org/x/term"
 )
 
 // inSSH is the one piece of runtime state still sourced from the environment:
@@ -1055,22 +1057,21 @@ func numberedBasePrompt(order []string, def, cur string) string {
 // a human can answer. Scripts, pipes, and non-TTY SSH commands fall through to
 // non-interactive defaults instead of blocking on a prompt.
 func isInteractive() bool {
-	fi, err := os.Stdin.Stat()
-	if err != nil {
-		return false
-	}
-	return fi.Mode()&os.ModeCharDevice != 0
+	return isTerminal(os.Stdin)
 }
 
 // stdoutIsTerminal reports whether stdout is a terminal. Commands that print
 // results to stdout use it to decide whether color is worth emitting: escape
 // codes help a human and only corrupt a pipe or file.
 func stdoutIsTerminal() bool {
-	fi, err := os.Stdout.Stat()
-	if err != nil {
-		return false
-	}
-	return fi.Mode()&os.ModeCharDevice != 0
+	return isTerminal(os.Stdout)
+}
+
+// isTerminal reports whether f is a real terminal. Checking for a character
+// device is not enough: /dev/null is one too, and agents and scripts often run
+// with stdin redirected there.
+func isTerminal(f *os.File) bool {
+	return term.IsTerminal(int(f.Fd()))
 }
 
 var sgr = regexp.MustCompile("\x1b\\[[0-9;]*m")

@@ -339,3 +339,53 @@ func captureList(t *testing.T, dir string, args ...string) string {
 	}
 	return buf.String()
 }
+
+// TestIsTerminalRejectsNonTTYs guards against treating any character device as
+// a terminal: /dev/null is one, and agents often run with stdin pointed at it.
+func TestIsTerminalRejectsNonTTYs(t *testing.T) {
+	// Open /dev/null, a pipe, and a regular file
+	devNull, err := os.Open(os.DevNull)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer devNull.Close()
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+	defer w.Close()
+	file, err := os.CreateTemp(t.TempDir(), "stdin")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer file.Close()
+
+	// None of them can answer a prompt
+	for name, f := range map[string]*os.File{"/dev/null": devNull, "pipe": r, "file": file} {
+		if isTerminal(f) {
+			t.Errorf("isTerminal(%s) = true, want false", name)
+		}
+	}
+}
+
+// TestBaseResolverDefaultsWhenStdinIsDevNull reproduces an agent running
+// 'grove path BRANCH' with stdin at /dev/null: it must base off the default
+// branch instead of launching fzf or the numbered menu.
+func TestBaseResolverDefaultsWhenStdinIsDevNull(t *testing.T) {
+	// Point stdin at /dev/null for the duration of the test
+	devNull, err := os.Open(os.DevNull)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer devNull.Close()
+	orig := os.Stdin
+	os.Stdin = devNull
+	defer func() { os.Stdin = orig }()
+
+	// A nil project is safe because the non-interactive path never touches it
+	got, err := baseResolver(nil, "")("main")
+	if err != nil || got != "main" {
+		t.Fatalf("baseResolver = %q, %v; want \"main\", nil", got, err)
+	}
+}
