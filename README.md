@@ -171,8 +171,9 @@ Enter.
 
 Pass `--from REF` to name the base branch up front and skip the prompt (works
 with `grove BRANCH`, `grove open`, and `grove path`). This is also what runs in
-non-interactive contexts — scripts, pipes, and non-TTY SSH commands never block
-on the prompt; without `--from` they fall back to the default branch.
+non-interactive contexts — scripts, pipes, agent shells with stdin at
+`/dev/null`, and non-TTY SSH commands never block on the prompt; without
+`--from` they fall back to the default branch.
 
 ```sh
 grove feature/b                 # prompts for the base branch
