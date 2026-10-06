@@ -275,7 +275,11 @@ func TestListShowsCommitAgeAndSortsWithT(t *testing.T) {
 		t.Fatalf("list should drop color when stdout is not a terminal: %q", out)
 	}
 
+	// Skip the header line: its temp path can contain "older" (macOS /var/folders)
 	sorted := captureList(t, filepath.Join(proj, "older"), "-t")
+	if _, rows, ok := strings.Cut(sorted, "\n"); ok {
+		sorted = rows
+	}
 	if i, j := strings.Index(sorted, "newer"), strings.Index(sorted, "older"); i < 0 || j < 0 || i > j {
 		t.Fatalf("-t should list newer before older, got %q", sorted)
 	}
