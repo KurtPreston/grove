@@ -454,3 +454,31 @@ func TestCloneSetsUpstreamOnDefaultBranch(t *testing.T) {
 	}
 	assertTracksOrigin(t, p.Base, branch)
 }
+
+// TestBranchListSkipsOriginHEAD checks that the origin/HEAD alias doesn't
+// surface as a branch named "origin", and that slashed remote branches keep
+// their full name.
+func TestBranchListSkipsOriginHEAD(t *testing.T) {
+	p := newTestProject(t)
+
+	// Fake a fetched origin with a symbolic HEAD and a slashed branch
+	runGit(t, p.Base, "update-ref", "refs/remotes/origin/remote-only", "HEAD")
+	runGit(t, p.Base, "update-ref", "refs/remotes/origin/feature/x", "HEAD")
+	runGit(t, p.Base, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/remote-only")
+
+	// Collect the list and check for the alias and the real branches
+	got := map[string]bool{}
+	for _, b := range p.BranchList() {
+		got[b] = true
+	}
+	for _, bad := range []string{"origin", "HEAD", "origin/HEAD"} {
+		if got[bad] {
+			t.Errorf("BranchList() includes %q: %v", bad, p.BranchList())
+		}
+	}
+	for _, want := range []string{"remote-only", "feature/x"} {
+		if !got[want] {
+			t.Errorf("BranchList() missing %q: %v", want, p.BranchList())
+		}
+	}
+}

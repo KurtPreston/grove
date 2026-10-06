@@ -467,9 +467,11 @@ func (p *Project) BranchList() []string {
 			add(strings.TrimSpace(line))
 		}
 	}
-	if o, err := GitOut(p.Base, "for-each-ref", "--format=%(refname:short)", "refs/remotes/origin"); err == nil {
+	// Strip refs/remotes/origin/ from the full ref name. refname:short shortens
+	// origin/HEAD to bare "origin", which would slip past the HEAD filter.
+	if o, err := GitOut(p.Base, "for-each-ref", "--format=%(refname:lstrip=3)", "refs/remotes/origin"); err == nil {
 		for _, line := range strings.Split(o, "\n") {
-			add(strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(line), "origin/")))
+			add(strings.TrimSpace(line))
 		}
 	}
 	sort.Strings(out)
