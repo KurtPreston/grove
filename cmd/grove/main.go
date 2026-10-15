@@ -544,10 +544,28 @@ func cmdPrune(args []string) {
 	if cfg.ForgeEnabled() {
 		forgeMerged = forgeMergedBranches(p, cfg)
 	}
+	in := pruneInputs{
+		p: p, def: def, cwd: cwd, cfg: cfg, partial: partial,
+		merged:      mergedBranches(p, "origin/"+def),
+		forgeMerged: forgeMerged,
+	}
+
+	// Classify every worktree in parallel; each check may run git (squash
+	// detection, status), which is slow on large repos.
+	results := make([]*pruneCandidate, len(wts))
+	done := runParallel(len(wts), statusWorkers(), func(i int) {
+		w := wts[i]
+		if r := in.reason(w); r != "" {
+			results[i] = &pruneCandidate{w.Branch, w.Path, r, !p.WorktreeClean(w.Path)}
+		}
+	})
+
+	// Collect candidates in worktree order
 	var candidates []pruneCandidate
-	for _, w := range wts {
-		if r := pruneReason(p, w, def, cwd, cfg, forgeMerged, partial); r != "" {
-			candidates = append(candidates, pruneCandidate{w.Branch, w.Path, r, !p.WorktreeClean(w.Path)})
+	for i := range wts {
+		<-done[i]
+		if results[i] != nil {
+			candidates = append(candidates, *results[i])
 		}
 	}
 	if len(candidates) == 0 {
@@ -643,28 +661,40 @@ func printPruneCandidate(c pruneCandidate, note string) {
 	fmt.Fprintln(os.Stderr)
 }
 
-// pruneReason returns why a worktree is a prune candidate ("merged", "squashed",
-// or "forge"), or "" when it should be kept. A worktree is never a candidate when
+// pruneInputs holds the project-wide facts prune classifies worktrees against,
+// gathered once so per-worktree checks don't repeat them.
+type pruneInputs struct {
+	p           *project.Project
+	def, cwd    string
+	cfg         config.Config
+	merged      map[string]bool // branches whose tips are ancestors of origin/<def>
+	forgeMerged map[string]bool // head branches of merged PRs, per the forge
+	partial     bool
+}
+
+// reason returns why a worktree is a prune candidate ("merged", "squashed", or
+// "forge"), or "" when it should be kept. A worktree is never a candidate when
 // it is bare, has no branch, is the default branch, or is the current directory.
-func pruneReason(p *project.Project, w project.Worktree, def, cwd string, cfg config.Config, forgeMerged map[string]bool, partial bool) string {
+func (in pruneInputs) reason(w project.Worktree) string {
+	p, cfg := in.p, in.cfg
 	if w.Path == "" || w.Branch == "" || w.Bare {
 		return ""
 	}
-	if w.Branch == def || w.Path == cwd {
+	if w.Branch == in.def || w.Path == in.cwd {
 		return ""
 	}
-	into := "origin/" + def
-	if branchMerged(p, w.Branch, into) {
+	into := "origin/" + in.def
+	if in.merged[w.Branch] {
 		return "merged"
 	}
 	// Squash/rebase merges rewrite history, so ancestry misses them; fall back
 	// to patch-equivalence against origin/default. Skip on partial clones, where
 	// the patch-id diff would lazy-fetch blobs from the remote.
-	if cfg.SquashDetectionEnabled() && !partial && p.BranchSquashMerged(w.Branch, into) {
+	if cfg.SquashDetectionEnabled() && !in.partial && p.BranchSquashMerged(w.Branch, into) {
 		return "squashed"
 	}
 	// Authoritative merged-PR state from the forge, when configured.
-	if forgeMerged[w.Branch] {
+	if in.forgeMerged[w.Branch] {
 		return "forge"
 	}
 	// Otherwise keep it. A "gone" upstream (branch.<name>.remote set with no
@@ -722,21 +752,21 @@ func forgeMergedBranches(p *project.Project, cfg config.Config) map[string]bool 
 	return merged
 }
 
-func branchMerged(p *project.Project, branch, into string) bool {
-	out, err := project.GitOut(p.Base, "branch", "--merged", into)
+// mergedBranches returns the local branches whose tips are reachable from into,
+// listed with a single `git branch --merged`. It returns nil if git fails, so no
+// branch counts as merged by ancestry.
+func mergedBranches(p *project.Project, into string) map[string]bool {
+	out, err := project.GitOut(p.Base, "branch", "--merged", into, "--format=%(refname:short)")
 	if err != nil {
-		return false
+		return nil
 	}
+	merged := map[string]bool{}
 	for _, line := range strings.Split(out, "\n") {
-		fields := strings.Fields(line)
-		if len(fields) == 0 {
-			continue
-		}
-		if fields[len(fields)-1] == branch {
-			return true
+		if b := strings.TrimSpace(line); b != "" {
+			merged[b] = true
 		}
 	}
-	return false
+	return merged
 }
 
 func cmdRm(args []string) {

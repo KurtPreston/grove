@@ -45,9 +45,9 @@ func squashOff() config.Config {
 
 // TestPruneReason exercises the full prune decision matrix on a real repo. It
 // stands up a branch for each outcome, freezes an origin/main tracking ref to
-// represent the upstream default, and asserts pruneReason classifies each one.
+// represent the upstream default, and asserts pruneInputs.reason classifies each one.
 //
-// A plain (non-bare) repo doubles as p.Base: pruneReason only shells git against
+// A plain (non-bare) repo doubles as p.Base: pruneInputs.reason only shells git against
 // it, and a working repo makes the merges/tracking config easy to script. The
 // origin/main ref is synthesized with update-ref instead of a second remote so
 // the "merged", "squashed", "never pushed", and "upstream present" states are
@@ -135,11 +135,16 @@ func TestPruneReason(t *testing.T) {
 		{"bare kept", project.Worktree{Path: "/wt/bare", Bare: true}, otherCwd, std, nil, false, ""},
 		{"no branch kept", project.Worktree{Path: "/wt/detached"}, otherCwd, std, nil, false, ""},
 	}
+	merged := mergedBranches(p, "origin/"+def)
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			got := pruneReason(p, tc.w, def, tc.cwd, tc.cfg, tc.forgeMerged, tc.partial)
+			in := pruneInputs{
+				p: p, def: def, cwd: tc.cwd, cfg: tc.cfg, partial: tc.partial,
+				merged: merged, forgeMerged: tc.forgeMerged,
+			}
+			got := in.reason(tc.w)
 			if got != tc.want {
-				t.Errorf("pruneReason(%q) = %q, want %q", tc.w.Branch, got, tc.want)
+				t.Errorf("reason(%q) = %q, want %q", tc.w.Branch, got, tc.want)
 			}
 		})
 	}
