@@ -282,15 +282,21 @@ func (p *Project) WorktreePathFor(branch string) (string, bool) {
 // not locked) and delegates the cleanup to `git worktree prune`, which keeps
 // branch refs — matching grove's removal philosophy. Locked worktrees (e.g. on
 // removable media) are left untouched. It returns the names of the reconciled
-// worktrees (branch name, or the folder basename for detached ones).
-func (p *Project) ReconcileStale() []string {
+// worktrees (branch name, or the folder basename for detached ones), plus the
+// worktree list as it stands afterwards, so callers that go on to enumerate
+// worktrees (e.g. `grove list`) don't have to run `git worktree list` again.
+func (p *Project) ReconcileStale() (pruned []string, wts []Worktree) {
 	wts, err := p.Worktrees()
 	if err != nil {
-		return nil
+		return nil, nil
 	}
+
+	// Collect the entries git reports as prunable, keeping the rest
 	var stale []string
+	live := make([]Worktree, 0, len(wts))
 	for _, w := range wts {
 		if w.Bare || !w.Prunable {
+			live = append(live, w)
 			continue
 		}
 		name := w.Branch
@@ -299,13 +305,15 @@ func (p *Project) ReconcileStale() []string {
 		}
 		stale = append(stale, name)
 	}
+
+	// Let git drop the stale entries; on failure report the list unchanged
 	if len(stale) == 0 {
-		return nil
+		return nil, wts
 	}
 	if !GitQuiet(p.Base, "worktree", "prune") {
-		return nil
+		return nil, wts
 	}
-	return stale
+	return stale, live
 }
 
 // ---------------------------------------------------------------------------

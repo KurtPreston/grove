@@ -335,9 +335,8 @@ func tmuxLayout(cfg config.Config) string {
 }
 
 func cmdList(args []string) {
-	p := mustResolve()
+	p, wts := mustResolveWorktrees()
 	porcelain, byTime := parseListFlags(args)
-	wts, _ := p.Worktrees()
 	var rows []project.Worktree
 	for _, w := range wts {
 		if w.Bare {
@@ -366,6 +365,7 @@ func cmdList(args []string) {
 	fmt.Println(style(fmt.Sprintf("%sProject:%s %s  %s(%s)%s",
 		ui.Bold, ui.Reset, p.Name(), ui.Dim, p.Dir, ui.Reset), styled))
 	session := project.Sanitize(p.Name())
+	windows := tmux.WindowNames(session)
 	now := time.Now()
 	ages := make([]string, len(rows))
 	ageWidth := 0
@@ -376,7 +376,7 @@ func cmdList(args []string) {
 		}
 	}
 	for i, w := range rows {
-		printRow(p, session, w, ages[i], ageWidth, styled)
+		printRow(w, windows, ages[i], ageWidth, styled)
 	}
 }
 
@@ -439,14 +439,14 @@ func ageUnits(n int, unit string) string {
 	return fmt.Sprintf("%d %ss ago", n, unit)
 }
 
-func printRow(p *project.Project, session string, w project.Worktree, age string, ageWidth int, styled bool) {
+func printRow(w project.Worktree, windows map[string]bool, age string, ageWidth int, styled bool) {
 	branch := w.Branch
 	if branch == "" {
 		branch = "(no branch)"
 	}
 
 	tmuxMark := ui.Dim + " -- " + ui.Reset
-	if w.Branch != "" && tmux.Has() && tmux.WindowExists(session, project.Sanitize(w.Branch)) {
+	if w.Branch != "" && windows[project.Sanitize(w.Branch)] {
 		tmuxMark = ui.Green + "tmux" + ui.Reset
 	}
 
@@ -896,23 +896,30 @@ func buildLaunchContext(name, dir string) recipe.Context {
 }
 
 func mustResolve() *project.Project {
+	p, _ := mustResolveWorktrees()
+	return p
+}
+
+// mustResolveWorktrees is mustResolve plus the reconciled worktree list, for
+// commands that enumerate worktrees anyway and can skip a second listing.
+func mustResolveWorktrees() (*project.Project, []project.Worktree) {
 	p, err := project.Resolve(mustGetwd())
 	if err != nil {
 		ui.Die(err.Error())
 	}
-	reconcileStale(p)
-	return p
+	return p, reconcileStale(p)
 }
 
 // reconcileStale clears git's leftover bookkeeping for worktree folders deleted
 // outside grove (e.g. `rm -rf`), so every command works from what's actually on
 // disk. It runs on project resolution rather than only in `grove list` so that
 // reused-branch flows (switch/open/path) don't trip over a vanished worktree
-// that git still thinks is checked out. Branch refs are kept.
-func reconcileStale(p *project.Project) {
-	pruned := p.ReconcileStale()
+// that git still thinks is checked out. Branch refs are kept. It returns the
+// worktree list as it stands after reconciling.
+func reconcileStale(p *project.Project) []project.Worktree {
+	pruned, wts := p.ReconcileStale()
 	if len(pruned) == 0 {
-		return
+		return wts
 	}
 	noun := "worktree"
 	if len(pruned) > 1 {
@@ -920,6 +927,7 @@ func reconcileStale(p *project.Project) {
 	}
 	ui.Info(fmt.Sprintf("Reconciled %d removed %s: %s (branch refs kept).",
 		len(pruned), noun, strings.Join(pruned, ", ")))
+	return wts
 }
 
 func mustGetwd() string {

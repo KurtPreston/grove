@@ -137,7 +137,7 @@ func commitDated(t *testing.T, dir, when, name, msg string) {
 func TestReconcileStalePrunesDeletedDirAndKeepsBranch(t *testing.T) {
 	p := newTestProject(t, "feature-a", "feature-b")
 
-	if got := p.ReconcileStale(); got != nil {
+	if got, _ := p.ReconcileStale(); got != nil {
 		t.Fatalf("nothing deleted yet, want no reconcile, got %v", got)
 	}
 
@@ -145,9 +145,17 @@ func TestReconcileStalePrunesDeletedDirAndKeepsBranch(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	got := p.ReconcileStale()
+	got, live := p.ReconcileStale()
 	if len(got) != 1 || got[0] != "feature-a" {
 		t.Fatalf("ReconcileStale = %v, want [feature-a]", got)
+	}
+
+	// The returned list already reflects the reconcile, matching git's view
+	if len(live) != len(mustWorktrees(t, p)) {
+		t.Errorf("returned worktrees %v should match git's post-reconcile list", live)
+	}
+	if _, ok := branchNames(live)["feature-a"]; ok {
+		t.Errorf("returned worktrees should not include the reconciled feature-a")
 	}
 
 	// The stale entry is gone from git's view...
@@ -164,7 +172,7 @@ func TestReconcileStalePrunesDeletedDirAndKeepsBranch(t *testing.T) {
 	}
 
 	// Idempotent: a second call finds nothing to do.
-	if got := p.ReconcileStale(); got != nil {
+	if got, _ := p.ReconcileStale(); got != nil {
 		t.Errorf("second ReconcileStale should be a no-op, got %v", got)
 	}
 }
