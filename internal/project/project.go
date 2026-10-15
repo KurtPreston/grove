@@ -575,6 +575,83 @@ func (p *Project) WorktreeClean(dir string) bool {
 	return strings.TrimSpace(out) == ""
 }
 
+// Dirtiness is a worktree's local-change state as reported by `git status`.
+type Dirtiness int
+
+const (
+	// DirtyUnknown means status failed or was cut short by its deadline.
+	DirtyUnknown Dirtiness = iota
+	Clean
+	Dirty
+)
+
+// WorktreeDirtiness runs `git status --porcelain` in dir and reports whether it
+// has local changes, giving up waiting when ctx ends. On a huge repo a single
+// status can take seconds (e.g. while git starts the fsmonitor daemon after a
+// reboot), so listings bound it.
+//
+// When ctx ends first, git is deliberately left running rather than killed.
+// status writes its refreshed index (and fsmonitor token) before printing, so a
+// status allowed to finish in the background makes the next listing fast. A
+// killed one would discard that work and every listing would time out again,
+// and SIGKILL could also leave index.lock behind.
+func WorktreeDirtiness(ctx context.Context, dir string) Dirtiness {
+	// Don't pile on while another git (e.g. an earlier listing's abandoned
+	// status) holds the index lock; it would only redo the same refresh
+	if indexLocked(dir) {
+		return DirtyUnknown
+	}
+
+	// Start status with output captured; GROVE_GIT_TIMEOUT still applies
+	gitCtx, cancel := gitContext()
+	cmd := exec.CommandContext(gitCtx, "git", "-C", dir, "status", "--porcelain")
+	cmd.Env = gitBaseEnv()
+	var out strings.Builder
+	cmd.Stdout = &out
+	cmd.Stderr = io.Discard
+	if err := cmd.Start(); err != nil {
+		cancel()
+		return DirtyUnknown
+	}
+
+	// Release gitCtx only once git exits, so giving up on it doesn't kill it
+	done := make(chan error, 1)
+	go func() {
+		err := cmd.Wait()
+		cancel()
+		done <- err
+	}()
+
+	// Classify the result, or stop waiting (leaving git running) when ctx ends
+	select {
+	case err := <-done:
+		switch {
+		case err != nil:
+			return DirtyUnknown
+		case strings.TrimSpace(out.String()) != "":
+			return Dirty
+		}
+		return Clean
+	case <-ctx.Done():
+		return DirtyUnknown
+	}
+}
+
+// indexLocked reports whether the worktree at dir has an index.lock, i.e. some
+// git process is mid-way through refreshing or writing its index. A linked
+// worktree's .git is a "gitdir: PATH" file; a main worktree's is a directory.
+func indexLocked(dir string) bool {
+	gitDir := filepath.Join(dir, ".git")
+	if b, err := os.ReadFile(gitDir); err == nil {
+		target := strings.TrimSpace(strings.TrimPrefix(string(b), "gitdir:"))
+		if !filepath.IsAbs(target) {
+			target = filepath.Join(dir, target)
+		}
+		gitDir = target
+	}
+	return pathExists(filepath.Join(gitDir, "index.lock"))
+}
+
 // RemoveWorktree removes a worktree directory (keeping the branch ref).
 //
 // git's plain `worktree remove` refuses any worktree that contains populated

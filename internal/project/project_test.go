@@ -1,6 +1,7 @@
 package project
 
 import (
+	"context"
 	"errors"
 	"os"
 	"os/exec"
@@ -489,4 +490,81 @@ func TestBranchListSkipsOriginHEAD(t *testing.T) {
 			t.Errorf("BranchList() missing %q: %v", want, p.BranchList())
 		}
 	}
+}
+
+func TestWorktreeDirtiness(t *testing.T) {
+	p := newTestProject(t, "feature")
+	dir := filepath.Join(p.Dir, "feature")
+	ctx := context.Background()
+
+	// A fresh worktree is clean; an untracked file makes it dirty
+	if got := WorktreeDirtiness(ctx, dir); got != Clean {
+		t.Fatalf("fresh worktree = %v, want Clean", got)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "new.txt"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if got := WorktreeDirtiness(ctx, dir); got != Dirty {
+		t.Fatalf("worktree with untracked file = %v, want Dirty", got)
+	}
+
+	// A missing directory can't be checked
+	if got := WorktreeDirtiness(ctx, filepath.Join(p.Dir, "nope")); got != DirtyUnknown {
+		t.Fatalf("missing dir = %v, want DirtyUnknown", got)
+	}
+
+	// While another git holds the index lock, skip the check rather than pile on
+	gitDir := strings.TrimSpace(mustGitOut(t, dir, "rev-parse", "--absolute-git-dir"))
+	lock := filepath.Join(gitDir, "index.lock")
+	if err := os.WriteFile(lock, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if got := WorktreeDirtiness(ctx, dir); got != DirtyUnknown {
+		t.Fatalf("locked index = %v, want DirtyUnknown", got)
+	}
+	if err := os.Remove(lock); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestWorktreeDirtinessTimeoutLetsGitFinish checks that a status whose deadline
+// passes reports DirtyUnknown without killing git: the abandoned status runs to
+// completion (so its index refresh warms the next listing) and leaves no
+// index.lock behind.
+func TestWorktreeDirtinessTimeoutLetsGitFinish(t *testing.T) {
+	p := newTestProject(t, "feature")
+	dir := filepath.Join(p.Dir, "feature")
+	gitDir := strings.TrimSpace(mustGitOut(t, dir, "rev-parse", "--absolute-git-dir"))
+
+	// An already-expired deadline gives up immediately
+	ctx, cancel := context.WithTimeout(context.Background(), 0)
+	defer cancel()
+	if got := WorktreeDirtiness(ctx, dir); got != DirtyUnknown {
+		t.Fatalf("expired deadline = %v, want DirtyUnknown", got)
+	}
+
+	// The abandoned status still finishes and releases its lock
+	lock := filepath.Join(gitDir, "index.lock")
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		if _, err := os.Stat(lock); errors.Is(err, os.ErrNotExist) {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("index.lock still present after abandoned status")
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if got := WorktreeDirtiness(context.Background(), dir); got != Clean {
+		t.Fatalf("status after abandoned run = %v, want Clean", got)
+	}
+}
+
+func mustGitOut(t *testing.T, dir string, args ...string) string {
+	t.Helper()
+	out, err := GitOut(dir, args...)
+	if err != nil {
+		t.Fatalf("git %v: %v", args, err)
+	}
+	return out
 }

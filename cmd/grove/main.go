@@ -16,6 +16,7 @@ package main
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -361,6 +362,15 @@ func cmdList(args []string) {
 		}
 		return
 	}
+	// Start the dirty checks now so they run while the header and ages are built
+	statusCtx, cancelStatus := context.WithTimeout(context.Background(), listStatusTimeout)
+	defer cancelStatus()
+	states := make([]project.Dirtiness, len(rows))
+	statusDone := runParallel(len(rows), statusWorkers(), func(i int) {
+		states[i] = project.WorktreeDirtiness(statusCtx, rows[i].Path)
+	})
+
+	// Print the header and compute the age column
 	styled := stdoutIsTerminal()
 	fmt.Println(style(fmt.Sprintf("%sProject:%s %s  %s(%s)%s",
 		ui.Bold, ui.Reset, p.Name(), ui.Dim, p.Dir, ui.Reset), styled))
@@ -375,9 +385,34 @@ func cmdList(args []string) {
 			ageWidth = n
 		}
 	}
+
+	// Stream rows in order as each one's status lands
+	unknown := false
 	for i, w := range rows {
-		printRow(w, windows, ages[i], ageWidth, styled)
+		<-statusDone[i]
+		unknown = unknown || states[i] == project.DirtyUnknown
+		printRow(w, windows, dirtyMark(states[i]), ages[i], ageWidth, styled)
 	}
+	if unknown && statusCtx.Err() == context.DeadlineExceeded {
+		fmt.Fprintf(os.Stderr, "%s? = git status took over %s, so local changes are unknown.%s\n",
+			ui.Dim, listStatusTimeout, ui.Reset)
+	}
+}
+
+// listStatusTimeout bounds all of a listing's dirty checks together. On a huge
+// repo a single `git status` can take seconds (e.g. while git starts the
+// fsmonitor daemon after a reboot); past this, rows show "?" instead.
+const listStatusTimeout = 2 * time.Second
+
+// dirtyMark renders a row's local-change column.
+func dirtyMark(d project.Dirtiness) string {
+	switch d {
+	case project.Dirty:
+		return ui.Yellow + "*" + ui.Reset
+	case project.DirtyUnknown:
+		return ui.Dim + "?" + ui.Reset
+	}
+	return " "
 }
 
 func parseListFlags(args []string) (porcelain, byTime bool) {
@@ -439,7 +474,7 @@ func ageUnits(n int, unit string) string {
 	return fmt.Sprintf("%d %ss ago", n, unit)
 }
 
-func printRow(w project.Worktree, windows map[string]bool, age string, ageWidth int, styled bool) {
+func printRow(w project.Worktree, windows map[string]bool, dirty, age string, ageWidth int, styled bool) {
 	branch := w.Branch
 	if branch == "" {
 		branch = "(no branch)"
@@ -448,11 +483,6 @@ func printRow(w project.Worktree, windows map[string]bool, age string, ageWidth 
 	tmuxMark := ui.Dim + " -- " + ui.Reset
 	if w.Branch != "" && windows[project.Sanitize(w.Branch)] {
 		tmuxMark = ui.Green + "tmux" + ui.Reset
-	}
-
-	dirty := " "
-	if out, err := project.GitOut(w.Path, "status", "--porcelain"); err == nil && strings.TrimSpace(out) != "" {
-		dirty = ui.Yellow + "*" + ui.Reset
 	}
 
 	row := fmt.Sprintf("%s  %s %s%s%s  %s",

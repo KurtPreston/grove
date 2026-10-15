@@ -289,6 +289,31 @@ func TestListShowsCommitAgeAndSortsWithT(t *testing.T) {
 	if len(lines) < 2 || !strings.HasPrefix(lines[0], "newer\t") {
 		t.Fatalf("-t --porcelain should start with newer, got %q", porcelain)
 	}
+
+	// Only the worktree with local changes gets the dirty marker
+	if err := os.WriteFile(filepath.Join(proj, "newer", "wip.txt"), []byte("wip"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	marks := listDirtyMarks(t, captureList(t, filepath.Join(proj, "older")))
+	if marks["newer"] != "*" || marks["older"] != " " {
+		t.Fatalf("dirty marks = %q, want newer=* older=blank", marks)
+	}
+}
+
+// listDirtyMarks maps each branch row of plain `grove list` output to its
+// dirty column (the character after the tmux marker).
+func listDirtyMarks(t *testing.T, out string) map[string]string {
+	t.Helper()
+	marks := map[string]string{}
+	lines := strings.Split(strings.TrimRight(out, "\n"), "\n")
+	for _, line := range lines[1:] {
+		fields := strings.Fields(line)
+		if len(line) < 7 || len(fields) == 0 {
+			t.Fatalf("unexpected list row %q", line)
+		}
+		marks[fields[len(fields)-1]] = line[6:7]
+	}
+	return marks
 }
 
 func gitCommitDated(t *testing.T, repo, when, name, content, msg string) {
