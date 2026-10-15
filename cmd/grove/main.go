@@ -337,7 +337,8 @@ func tmuxLayout(cfg config.Config) string {
 
 func cmdList(args []string) {
 	p, wts := mustResolveWorktrees()
-	porcelain, byTime := parseListFlags(args)
+	flags := parseListFlags(args)
+	porcelain := flags.porcelain
 	var rows []project.Worktree
 	for _, w := range wts {
 		if w.Bare {
@@ -353,7 +354,7 @@ func cmdList(args []string) {
 		heads = append(heads, w.Head)
 	}
 	times := p.CommitTimes(heads)
-	if byTime {
+	if flags.byTime {
 		sortWorktreesByCommitTime(rows, times)
 	}
 	if porcelain {
@@ -363,12 +364,18 @@ func cmdList(args []string) {
 		return
 	}
 	// Start the dirty checks now so they run while the header and ages are built
-	statusCtx, cancelStatus := context.WithTimeout(context.Background(), listStatusTimeout)
+	cfg := loadCfg(p)
+	checkStatus := cfg.ListStatusEnabled() && !flags.noStatus
+	timeout := cfg.ListStatusTimeout()
+	statusCtx, cancelStatus := listStatusContext(timeout)
 	defer cancelStatus()
 	states := make([]project.Dirtiness, len(rows))
-	statusDone := runParallel(len(rows), statusWorkers(), func(i int) {
-		states[i] = project.WorktreeDirtiness(statusCtx, rows[i].Path)
-	})
+	var statusDone []chan struct{}
+	if checkStatus {
+		statusDone = runParallel(len(rows), statusWorkers(), func(i int) {
+			states[i] = project.WorktreeDirtiness(statusCtx, rows[i].Path)
+		})
+	}
 
 	// Print the header and compute the age column
 	styled := stdoutIsTerminal()
@@ -389,20 +396,30 @@ func cmdList(args []string) {
 	// Stream rows in order as each one's status lands
 	unknown := false
 	for i, w := range rows {
-		<-statusDone[i]
-		unknown = unknown || states[i] == project.DirtyUnknown
-		printRow(w, windows, dirtyMark(states[i]), ages[i], ageWidth, styled)
+		mark := " "
+		if checkStatus {
+			<-statusDone[i]
+			unknown = unknown || states[i] == project.DirtyUnknown
+			mark = dirtyMark(states[i])
+		}
+		printRow(w, windows, mark, ages[i], ageWidth, styled)
 	}
 	if unknown && statusCtx.Err() == context.DeadlineExceeded {
-		fmt.Fprintf(os.Stderr, "%s? = git status took over %s, so local changes are unknown.%s\n",
-			ui.Dim, listStatusTimeout, ui.Reset)
+		fmt.Fprintf(os.Stderr, "%s? = git status took over %s; raise list.statusTimeout in grove.json, or skip the check with --no-status.%s\n",
+			ui.Dim, timeout, ui.Reset)
 	}
 }
 
-// listStatusTimeout bounds all of a listing's dirty checks together. On a huge
+// listStatusContext bounds all of a listing's dirty checks together. On a huge
 // repo a single `git status` can take seconds (e.g. while git starts the
-// fsmonitor daemon after a reboot); past this, rows show "?" instead.
-const listStatusTimeout = 2 * time.Second
+// fsmonitor daemon after a reboot); past the timeout, rows show "?" instead.
+// A zero timeout waits for every check.
+func listStatusContext(timeout time.Duration) (context.Context, context.CancelFunc) {
+	if timeout > 0 {
+		return context.WithTimeout(context.Background(), timeout)
+	}
+	return context.WithCancel(context.Background())
+}
 
 // dirtyMark renders a row's local-change column.
 func dirtyMark(d project.Dirtiness) string {
@@ -415,16 +432,24 @@ func dirtyMark(d project.Dirtiness) string {
 	return " "
 }
 
-func parseListFlags(args []string) (porcelain, byTime bool) {
+// listFlags holds `grove list`'s command-line options.
+type listFlags struct {
+	porcelain, byTime, noStatus bool
+}
+
+func parseListFlags(args []string) listFlags {
+	var f listFlags
 	for _, a := range args {
 		switch a {
 		case "--porcelain":
-			porcelain = true
+			f.porcelain = true
 		case "-t", "--time":
-			byTime = true
+			f.byTime = true
+		case "--no-status":
+			f.noStatus = true
 		}
 	}
-	return porcelain, byTime
+	return f
 }
 
 func sortWorktreesByCommitTime(wts []project.Worktree, times map[string]time.Time) {
@@ -1188,7 +1213,10 @@ Usage:
   grove switch [BRANCH]          Like a bare BRANCH; no BRANCH opens an fzf picker
   grove path BRANCH              Resolve (creating if needed) BRANCH's worktree; print its path
   grove tmux                     Attach the project session, building a window per worktree
-  grove list | ls [-t] [--porcelain]  List worktrees with last commit time; -t newest first; --porcelain prints branch<TAB>path
+  grove list | ls [-t] [--porcelain] [--no-status]
+                                 List worktrees with last commit time and local changes (*);
+                                 -t newest first; --porcelain prints branch<TAB>path;
+                                 --no-status skips the local-changes check
   grove prune [--dry-run] [--force]   Remove merged worktrees (keeps branch refs); worktrees with local
                                  changes are kept unless --force discards them
   grove rm BRANCH [--force]      Remove a single worktree (keeps branch ref); --force discards local changes

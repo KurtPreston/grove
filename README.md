@@ -134,7 +134,7 @@ for when and why to enable the recipe.
 | `grove switch [BRANCH]` | Like a bare BRANCH; with no branch and `fzf` installed, opens a picker |
 | `grove path BRANCH` | Resolve (creating if needed) BRANCH's worktree and print its absolute path to stdout |
 | `grove tmux` | Attach the project's tmux session, building a window for every worktree |
-| `grove list` / `ls [-t] [--porcelain]` | List worktrees with each branch's last commit time; `-t` orders newest first; `--porcelain` prints `branch<TAB>path` |
+| `grove list` / `ls [-t] [--porcelain] [--no-status]` | List worktrees with each branch's last commit time and a `*` for local changes; `-t` orders newest first; `--porcelain` prints `branch<TAB>path`; `--no-status` skips the local-changes check (see [Listing large repos](#listing-large-repos)) |
 | `grove prune [--dry-run] [--force]` | Remove worktrees whose branches are merged, including squash/rebase merges (keeps branch refs); never-pushed branches are left alone. A worktree with local changes is kept unless `--force`/`-f` is passed. `--dry-run`/`-n` lists candidates without removing anything |
 | `grove rm BRANCH [--force]` | Remove a single worktree (keeps the branch ref); `--force` discards local changes |
 | `grove color BRANCH` | Print the deterministic color for a branch |
@@ -538,6 +538,7 @@ autocomplete and inline validation.
 | `copy` | `[".env"]` | Untracked files copied from the default-branch worktree into new worktrees |
 | `hooks` | `{ "onOpen": [{ "type": "tmux" }] }` | The three lifecycle buckets, each an ordered array of recipes (see [Hooks](#hooks)) |
 | `prune` | _(see below)_ | Tunes how `grove prune` decides which branches count as merged (see [Prune detection](#prune-detection)) |
+| `list` | `{ "status": true, "statusTimeout": 2 }` | Tunes `grove list`'s local-changes check (see [Listing large repos](#listing-large-repos)) |
 
 When `grove.json` is absent, or its `hooks` key is omitted, grove falls back to
 these defaults, so a project works before you write any config. An explicit
@@ -582,6 +583,26 @@ authentication for the remote's host; if `gh` is missing, the repo can't be
 resolved, or the query fails, grove warns once and falls back to the git-only
 checks. Run `grove prune --dry-run` to preview candidates (with their reason)
 without removing anything.
+
+### Listing large repos
+
+`grove list` marks a worktree with local changes by running `git status` in it.
+The checks run in parallel, and rows print in order as each one finishes. On a
+very large repo a single status can take seconds, notably the first run after a
+reboot while git starts its fsmonitor daemon. So the listing waits at most
+`list.statusTimeout` seconds (default 2) in total, and shows `?` for rows still
+pending. Those statuses keep running in the background, so the next listing is
+usually fast again.
+
+```jsonc
+"list": {
+  "status": true,       // default; set false to skip the local-changes check
+  "statusTimeout": 2    // default; seconds to wait in total, 0 waits for every check
+}
+```
+
+Pass `--no-status` to skip the check for a single run. `--porcelain` never runs
+it.
 
 The only environment input grove reads directly is `GROVE_CD_FILE`, which the
 shell integration sets so the opt-in

@@ -298,6 +298,12 @@ func TestListShowsCommitAgeAndSortsWithT(t *testing.T) {
 	if marks["newer"] != "*" || marks["older"] != " " {
 		t.Fatalf("dirty marks = %q, want newer=* older=blank", marks)
 	}
+
+	// --no-status skips the check, so nothing is marked
+	marks = listDirtyMarks(t, captureList(t, filepath.Join(proj, "older"), "--no-status"))
+	if marks["newer"] != " " || marks["older"] != " " {
+		t.Fatalf("--no-status marks = %q, want all blank", marks)
+	}
 }
 
 // listDirtyMarks maps each branch row of plain `grove list` output to its

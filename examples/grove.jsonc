@@ -47,4 +47,9 @@
   // Tune `grove prune` merge detection. Squash/rebase detection is on by default;
   // enable "forge" to also treat branches with a merged PR (via the gh CLI) as prunable.
   // "prune": { "detectSquash": true, "forge": { "enabled": false } },
+
+  // Tune `grove list`'s local-changes column, which runs `git status` in every
+  // worktree. Rows still pending after statusTimeout seconds show "?"; on a very
+  // large repo, set "status": false to skip the check entirely.
+  // "list": { "status": true, "statusTimeout": 2 },
 }

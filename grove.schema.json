@@ -68,6 +68,22 @@
           }
         }
       }
+    },
+    "list": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Settings for `grove list`.",
+      "properties": {
+        "status": {
+          "type": "boolean",
+          "description": "Show the local-changes column, which runs `git status` in every worktree (default: true). Set false on very large repos to skip it; `grove list --no-status` does the same for one run."
+        },
+        "statusTimeout": {
+          "type": "number",
+          "minimum": 0,
+          "description": "Seconds `grove list` waits, in total, for the local-changes checks before showing `?` for rows still pending (default: 2). 0 waits for every check."
+        }
+      }
     }
   },
   "$defs": {
