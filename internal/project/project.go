@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -723,6 +724,53 @@ func (p *Project) BranchSquashMerged(branch, into string) bool {
 		return false
 	}
 	return strings.HasPrefix(strings.TrimSpace(out), "-")
+}
+
+// CommitMerged reports whether rev is an ancestor of into (e.g. "origin/main").
+// It is the detached-HEAD counterpart of `git branch --merged`, which lists only
+// branches.
+func (p *Project) CommitMerged(rev, into string) bool {
+	return GitQuiet(p.Base, "merge-base", "--is-ancestor", rev, into)
+}
+
+// prSuffix matches the " (#123)" that forges append to a squash commit's subject.
+var prSuffix = regexp.MustCompile(`\s+\(#\d+\)$`)
+
+// SubjectsUpstream reports whether every non-merge commit that only head holds
+// (reachable from no branch, remote-tracking ref, or tag) has a commit with the
+// same subject in into but not in head, ignoring a trailing " (#N)".
+//
+// It catches a detached worktree left at a commit that was later squash-merged
+// against a newer default branch: the squash's diff then differs from the
+// commit's (conflict resolutions, a "Merge main" folded in), so the
+// patch-equivalence check misses it, and no ref still holds the original commit.
+// It is a heuristic, so it reports false when head holds no commits of its own:
+// a HEAD that some ref still holds is not evidence of anything upstream.
+func (p *Project) SubjectsUpstream(head, into string) bool {
+	// Subjects of the commits only head holds
+	own, err := GitOut(p.Base, "log", "--no-merges", "--format=%s", head, "--not", "--branches", "--remotes", "--tags")
+	if err != nil || strings.TrimSpace(own) == "" {
+		return false
+	}
+
+	// Subjects that landed upstream since head forked, without their PR numbers
+	theirs, err := GitOut(p.Base, "log", "--no-merges", "--format=%s", into, "--not", head)
+	if err != nil {
+		return false
+	}
+	landed := make(map[string]bool)
+	for _, s := range strings.Split(theirs, "\n") {
+		landed[prSuffix.ReplaceAllString(strings.TrimSpace(s), "")] = true
+	}
+
+	// Every commit of head's own must have landed
+	for _, s := range strings.Split(strings.TrimSpace(own), "\n") {
+		s = prSuffix.ReplaceAllString(strings.TrimSpace(s), "")
+		if s == "" || !landed[s] {
+			return false
+		}
+	}
+	return true
 }
 
 // OriginRepoSlug returns the "host/owner/repo" slug for the origin remote,

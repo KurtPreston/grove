@@ -611,7 +611,8 @@ func cmdPrune(args []string) {
 
 	session := project.Sanitize(p.Name())
 	for _, c := range remove {
-		if tmux.Has() {
+		// Only branch worktrees get a tmux window
+		if c.branch != "" && tmux.Has() {
 			tmux.KillWindow(session, project.Sanitize(c.branch))
 		}
 		// Anything reaching this loop is either clean or was opted in with
@@ -620,6 +621,8 @@ func cmdPrune(args []string) {
 		switch err := p.RemoveWorktree(c.path, true); {
 		case err != nil:
 			ui.Warn(fmt.Sprintf("Could not remove %s: %v", c.path, err))
+		case c.branch == "":
+			ui.Info(fmt.Sprintf("Removed detached worktree %s.", c.path))
 		default:
 			ui.Info(fmt.Sprintf("Removed worktree %s (branch '%s' kept).", c.path, c.branch))
 		}
@@ -653,8 +656,13 @@ func splitPruneCandidates(cands []pruneCandidate, force bool) (remove, kept []pr
 // printPruneCandidate writes one listing row: swatch, branch, prune reason, and
 // an optional trailing note about the worktree's local changes.
 func printPruneCandidate(c pruneCandidate, note string) {
+	// A detached worktree has no branch, so it is shown by its path
+	label := c.branch
+	if label == "" {
+		label = "(no branch) " + c.path
+	}
 	fmt.Fprintf(os.Stderr, "  %s %-28s %s%s%s",
-		color.Swatch(color.ForBranch(c.branch)), c.branch, ui.Dim, c.reason, ui.Reset)
+		color.Swatch(color.ForBranch(label)), label, ui.Dim, c.reason, ui.Reset)
 	if note != "" {
 		fmt.Fprintf(os.Stderr, " %s", note)
 	}
@@ -672,18 +680,22 @@ type pruneInputs struct {
 	partial     bool
 }
 
-// reason returns why a worktree is a prune candidate ("merged", "squashed", or
-// "forge"), or "" when it should be kept. A worktree is never a candidate when
-// it is bare, has no branch, is the default branch, or is the current directory.
+// reason returns why a worktree is a prune candidate ("merged", "squashed",
+// "forge", or "subject"), or "" when it should be kept. A worktree is never a
+// candidate when it is bare, is the default branch, or is the current directory.
+// Detached worktrees are judged by their HEAD commit (see detachedReason).
 func (in pruneInputs) reason(w project.Worktree) string {
 	p, cfg := in.p, in.cfg
-	if w.Path == "" || w.Branch == "" || w.Bare {
-		return ""
-	}
-	if w.Branch == in.def || w.Path == in.cwd {
+	if w.Path == "" || w.Bare || w.Path == in.cwd {
 		return ""
 	}
 	into := "origin/" + in.def
+	if w.Branch == "" {
+		return in.detachedReason(w, into)
+	}
+	if w.Branch == in.def {
+		return ""
+	}
 	if in.merged[w.Branch] {
 		return "merged"
 	}
@@ -706,6 +718,32 @@ func (in pruneInputs) reason(w project.Worktree) string {
 	// tells them apart. Treating that as a candidate discarded never-pushed work,
 	// so grove prunes only branches whose work is provably upstream (the
 	// merged/squashed/forge checks above).
+	return ""
+}
+
+// detachedReason classifies a detached worktree by its HEAD commit, which no
+// branch names, so the forge can't be asked about it. Beyond ancestry and
+// patch-equivalence it accepts "subject": every commit only HEAD holds landed
+// upstream under the same subject, as when a commit checked out to test a merge
+// was then squash-merged against a newer default branch.
+func (in pruneInputs) detachedReason(w project.Worktree, into string) string {
+	p, cfg, partial := in.p, in.cfg, in.partial
+	if !w.Detached || w.Head == "" {
+		return ""
+	}
+	if p.CommitMerged(w.Head, into) {
+		return "merged"
+	}
+	// Squash checks share the branch path's partial-clone guard
+	if !cfg.SquashDetectionEnabled() || partial {
+		return ""
+	}
+	if p.BranchSquashMerged(w.Head, into) {
+		return "squashed"
+	}
+	if p.SubjectsUpstream(w.Head, into) {
+		return "subject"
+	}
 	return ""
 }
 

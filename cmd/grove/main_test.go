@@ -22,6 +22,15 @@ func gitDo(t *testing.T, dir string, args ...string) {
 	}
 }
 
+func gitRev(t *testing.T, dir, rev string) string {
+	t.Helper()
+	out, err := exec.Command("git", "-C", dir, "rev-parse", rev).Output()
+	if err != nil {
+		t.Fatalf("git rev-parse %s failed: %v", rev, err)
+	}
+	return strings.TrimSpace(string(out))
+}
+
 func gitCommit(t *testing.T, repo, name, content, msg string) {
 	t.Helper()
 	if err := os.WriteFile(filepath.Join(repo, name), []byte(content), 0o644); err != nil {
@@ -82,6 +91,23 @@ func TestPruneReason(t *testing.T) {
 	gitDo(t, base, "merge", "--squash", "feat-squash")
 	gitDo(t, base, "commit", "-q", "-m", "squash feat-squash")
 
+	// Squash under a PR-numbered subject, against a newer main: the diff differs,
+	// so only the subject ties the landed commit to the detached one. The branch is
+	// deleted, as forges do on merge, leaving the commit held by no ref.
+	gitDo(t, base, "checkout", "-q", "-b", "feat-pr", "main")
+	gitCommit(t, base, "pr.txt", "p", "p1")
+	prHead := gitRev(t, base, "feat-pr")
+	gitDo(t, base, "checkout", "-q", "main")
+	gitCommit(t, base, "pr.txt", "p, resolved", "p1 (#7)")
+	gitDo(t, base, "branch", "-q", "-D", "feat-pr")
+
+	// Orphaned and unmerged: a commit no ref holds whose subject never landed.
+	gitDo(t, base, "checkout", "-q", "-b", "feat-lost", "main")
+	gitCommit(t, base, "lost.txt", "l", "l1")
+	lostHead := gitRev(t, base, "feat-lost")
+	gitDo(t, base, "checkout", "-q", "main")
+	gitDo(t, base, "branch", "-q", "-D", "feat-lost")
+
 	// Freeze the upstream default so it contains the merged + squashed work.
 	gitDo(t, base, "update-ref", "refs/remotes/origin/main", "main")
 
@@ -112,6 +138,9 @@ func TestPruneReason(t *testing.T) {
 	const otherCwd = "/some/other/cwd"
 	std := config.Config{} // squash detection on, forge off
 	wt := func(b string) project.Worktree { return project.Worktree{Path: "/wt/" + b, Branch: b} }
+	detached := func(head string) project.Worktree {
+		return project.Worktree{Path: "/wt/detached", Head: head, Detached: true}
+	}
 
 	tests := []struct {
 		name        string
@@ -133,7 +162,15 @@ func TestPruneReason(t *testing.T) {
 		{"default branch kept", wt("main"), otherCwd, std, nil, false, ""},
 		{"current dir kept", project.Worktree{Path: otherCwd, Branch: "feat-merged"}, otherCwd, std, nil, false, ""},
 		{"bare kept", project.Worktree{Path: "/wt/bare", Bare: true}, otherCwd, std, nil, false, ""},
-		{"no branch kept", project.Worktree{Path: "/wt/detached"}, otherCwd, std, nil, false, ""},
+		{"no branch or head kept", project.Worktree{Path: "/wt/detached"}, otherCwd, std, nil, false, ""},
+		{"detached merged", detached(gitRev(t, base, "feat-merged")), otherCwd, std, nil, false, "merged"},
+		{"detached squashed", detached(gitRev(t, base, "feat-squash")), otherCwd, std, nil, false, "squashed"},
+		{"detached subject landed", detached(prHead), otherCwd, std, nil, false, "subject"},
+		{"detached subject needs squash detection", detached(prHead), otherCwd, squashOff(), nil, false, ""},
+		{"detached subject skipped on partial clone", detached(prHead), otherCwd, std, nil, true, ""},
+		{"detached unmerged kept", detached(lostHead), otherCwd, std, nil, false, ""},
+		{"detached on open branch kept", detached(gitRev(t, base, "feat-open")), otherCwd, std, nil, false, ""},
+		{"detached current dir kept", project.Worktree{Path: otherCwd, Head: prHead, Detached: true}, otherCwd, std, nil, false, ""},
 	}
 	merged := mergedBranches(p, "origin/"+def)
 	for _, tc := range tests {
