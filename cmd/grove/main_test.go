@@ -54,9 +54,9 @@ func squashOff() config.Config {
 
 // TestPruneReason exercises the full prune decision matrix on a real repo. It
 // stands up a branch for each outcome, freezes an origin/main tracking ref to
-// represent the upstream default, and asserts pruneReason classifies each one.
+// represent the upstream default, and asserts pruneInputs.reason classifies each one.
 //
-// A plain (non-bare) repo doubles as p.Base: pruneReason only shells git against
+// A plain (non-bare) repo doubles as p.Base: pruneInputs.reason only shells git against
 // it, and a working repo makes the merges/tracking config easy to script. The
 // origin/main ref is synthesized with update-ref instead of a second remote so
 // the "merged", "squashed", "never pushed", and "upstream present" states are
@@ -172,11 +172,16 @@ func TestPruneReason(t *testing.T) {
 		{"detached on open branch kept", detached(gitRev(t, base, "feat-open")), otherCwd, std, nil, false, ""},
 		{"detached current dir kept", project.Worktree{Path: otherCwd, Head: prHead, Detached: true}, otherCwd, std, nil, false, ""},
 	}
+	merged := mergedBranches(p, "origin/"+def)
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			got := pruneReason(p, tc.w, def, tc.cwd, tc.cfg, tc.forgeMerged, tc.partial)
+			in := pruneInputs{
+				p: p, def: def, cwd: tc.cwd, cfg: tc.cfg, partial: tc.partial,
+				merged: merged, forgeMerged: tc.forgeMerged,
+			}
+			got := in.reason(tc.w)
 			if got != tc.want {
-				t.Errorf("pruneReason(%q) = %q, want %q", tc.w.Branch, got, tc.want)
+				t.Errorf("reason(%q) = %q, want %q", tc.w.Branch, got, tc.want)
 			}
 		})
 	}
@@ -326,6 +331,37 @@ func TestListShowsCommitAgeAndSortsWithT(t *testing.T) {
 	if len(lines) < 2 || !strings.HasPrefix(lines[0], "newer\t") {
 		t.Fatalf("-t --porcelain should start with newer, got %q", porcelain)
 	}
+
+	// Only the worktree with local changes gets the dirty marker
+	if err := os.WriteFile(filepath.Join(proj, "newer", "wip.txt"), []byte("wip"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	marks := listDirtyMarks(t, captureList(t, filepath.Join(proj, "older")))
+	if marks["newer"] != "*" || marks["older"] != " " {
+		t.Fatalf("dirty marks = %q, want newer=* older=blank", marks)
+	}
+
+	// --no-status skips the check, so nothing is marked
+	marks = listDirtyMarks(t, captureList(t, filepath.Join(proj, "older"), "--no-status"))
+	if marks["newer"] != " " || marks["older"] != " " {
+		t.Fatalf("--no-status marks = %q, want all blank", marks)
+	}
+}
+
+// listDirtyMarks maps each branch row of plain `grove list` output to its
+// dirty column (the character after the tmux marker).
+func listDirtyMarks(t *testing.T, out string) map[string]string {
+	t.Helper()
+	marks := map[string]string{}
+	lines := strings.Split(strings.TrimRight(out, "\n"), "\n")
+	for _, line := range lines[1:] {
+		fields := strings.Fields(line)
+		if len(line) < 7 || len(fields) == 0 {
+			t.Fatalf("unexpected list row %q", line)
+		}
+		marks[fields[len(fields)-1]] = line[6:7]
+	}
+	return marks
 }
 
 func gitCommitDated(t *testing.T, repo, when, name, content, msg string) {

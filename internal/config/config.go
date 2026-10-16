@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"grove/examples"
 	"grove/internal/ui"
@@ -47,6 +48,45 @@ type Config struct {
 	// Prune configures `grove prune` merge detection. When omitted, squash/rebase
 	// detection is on and the forge PR check is off.
 	Prune *PruneConfig `json:"prune,omitempty"`
+	// List configures `grove list`. When omitted, the local-changes check is on
+	// with a DefaultListStatusTimeout cap.
+	List *ListConfig `json:"list,omitempty"`
+}
+
+// DefaultListStatusTimeout is how long `grove list` waits, in total, for its
+// per-worktree local-changes checks unless list.statusTimeout overrides it.
+const DefaultListStatusTimeout = 2 * time.Second
+
+// ListConfig holds the settings for `grove list`.
+type ListConfig struct {
+	// Status enables the per-worktree local-changes column, which runs
+	// `git status` in every worktree. Defaults to true when nil.
+	Status *bool `json:"status,omitempty"`
+	// StatusTimeout caps, in seconds, how long a listing waits for those
+	// checks; rows still pending show "?". 0 waits for every check. Defaults to
+	// DefaultListStatusTimeout when nil.
+	StatusTimeout *float64 `json:"statusTimeout,omitempty"`
+}
+
+// ListStatusEnabled reports whether `grove list` should check each worktree for
+// local changes (the default).
+func (c Config) ListStatusEnabled() bool {
+	if c.List == nil || c.List.Status == nil {
+		return true
+	}
+	return *c.List.Status
+}
+
+// ListStatusTimeout returns the cap on `grove list`'s local-changes checks, or 0
+// for no cap.
+func (c Config) ListStatusTimeout() time.Duration {
+	if c.List == nil || c.List.StatusTimeout == nil {
+		return DefaultListStatusTimeout
+	}
+	if s := *c.List.StatusTimeout; s > 0 {
+		return time.Duration(s * float64(time.Second))
+	}
+	return 0
 }
 
 // Hooks groups the recipes grove runs at each point in a branch's lifecycle.

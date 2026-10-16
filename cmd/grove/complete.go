@@ -39,8 +39,8 @@ var completeFlags = map[string][]string{
 	"prune":  {"--dry-run", "-n", "--force", "-f"},
 	"rm":     {"--force", "-f"},
 	"remove": {"--force", "-f"},
-	"list":   {"--porcelain", "-t", "--time"},
-	"ls":     {"--porcelain", "-t", "--time"},
+	"list":   {"--porcelain", "-t", "--time", "--no-status"},
+	"ls":     {"--porcelain", "-t", "--time", "--no-status"},
 	"update": {"--force", "-f"},
 }
 

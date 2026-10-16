@@ -16,6 +16,7 @@ package main
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -335,9 +336,9 @@ func tmuxLayout(cfg config.Config) string {
 }
 
 func cmdList(args []string) {
-	p := mustResolve()
-	porcelain, byTime := parseListFlags(args)
-	wts, _ := p.Worktrees()
+	p, wts := mustResolveWorktrees()
+	flags := parseListFlags(args)
+	porcelain := flags.porcelain
 	var rows []project.Worktree
 	for _, w := range wts {
 		if w.Bare {
@@ -353,7 +354,7 @@ func cmdList(args []string) {
 		heads = append(heads, w.Head)
 	}
 	times := p.CommitTimes(heads)
-	if byTime {
+	if flags.byTime {
 		sortWorktreesByCommitTime(rows, times)
 	}
 	if porcelain {
@@ -362,10 +363,26 @@ func cmdList(args []string) {
 		}
 		return
 	}
+	// Start the dirty checks now so they run while the header and ages are built
+	cfg := loadCfg(p)
+	checkStatus := cfg.ListStatusEnabled() && !flags.noStatus
+	timeout := cfg.ListStatusTimeout()
+	statusCtx, cancelStatus := listStatusContext(timeout)
+	defer cancelStatus()
+	states := make([]project.Dirtiness, len(rows))
+	var statusDone []chan struct{}
+	if checkStatus {
+		statusDone = runParallel(len(rows), statusWorkers(), func(i int) {
+			states[i] = project.WorktreeDirtiness(statusCtx, rows[i].Path)
+		})
+	}
+
+	// Print the header and compute the age column
 	styled := stdoutIsTerminal()
 	fmt.Println(style(fmt.Sprintf("%sProject:%s %s  %s(%s)%s",
 		ui.Bold, ui.Reset, p.Name(), ui.Dim, p.Dir, ui.Reset), styled))
 	session := project.Sanitize(p.Name())
+	windows := tmux.WindowNames(session)
 	now := time.Now()
 	ages := make([]string, len(rows))
 	ageWidth := 0
@@ -375,21 +392,64 @@ func cmdList(args []string) {
 			ageWidth = n
 		}
 	}
+
+	// Stream rows in order as each one's status lands
+	unknown := false
 	for i, w := range rows {
-		printRow(p, session, w, ages[i], ageWidth, styled)
+		mark := " "
+		if checkStatus {
+			<-statusDone[i]
+			unknown = unknown || states[i] == project.DirtyUnknown
+			mark = dirtyMark(states[i])
+		}
+		printRow(w, windows, mark, ages[i], ageWidth, styled)
+	}
+	if unknown && statusCtx.Err() == context.DeadlineExceeded {
+		fmt.Fprintf(os.Stderr, "%s? = git status took over %s; raise list.statusTimeout in grove.json, or skip the check with --no-status.%s\n",
+			ui.Dim, timeout, ui.Reset)
 	}
 }
 
-func parseListFlags(args []string) (porcelain, byTime bool) {
+// listStatusContext bounds all of a listing's dirty checks together. On a huge
+// repo a single `git status` can take seconds (e.g. while git starts the
+// fsmonitor daemon after a reboot); past the timeout, rows show "?" instead.
+// A zero timeout waits for every check.
+func listStatusContext(timeout time.Duration) (context.Context, context.CancelFunc) {
+	if timeout > 0 {
+		return context.WithTimeout(context.Background(), timeout)
+	}
+	return context.WithCancel(context.Background())
+}
+
+// dirtyMark renders a row's local-change column.
+func dirtyMark(d project.Dirtiness) string {
+	switch d {
+	case project.Dirty:
+		return ui.Yellow + "*" + ui.Reset
+	case project.DirtyUnknown:
+		return ui.Dim + "?" + ui.Reset
+	}
+	return " "
+}
+
+// listFlags holds `grove list`'s command-line options.
+type listFlags struct {
+	porcelain, byTime, noStatus bool
+}
+
+func parseListFlags(args []string) listFlags {
+	var f listFlags
 	for _, a := range args {
 		switch a {
 		case "--porcelain":
-			porcelain = true
+			f.porcelain = true
 		case "-t", "--time":
-			byTime = true
+			f.byTime = true
+		case "--no-status":
+			f.noStatus = true
 		}
 	}
-	return porcelain, byTime
+	return f
 }
 
 func sortWorktreesByCommitTime(wts []project.Worktree, times map[string]time.Time) {
@@ -439,20 +499,15 @@ func ageUnits(n int, unit string) string {
 	return fmt.Sprintf("%d %ss ago", n, unit)
 }
 
-func printRow(p *project.Project, session string, w project.Worktree, age string, ageWidth int, styled bool) {
+func printRow(w project.Worktree, windows map[string]bool, dirty, age string, ageWidth int, styled bool) {
 	branch := w.Branch
 	if branch == "" {
 		branch = "(no branch)"
 	}
 
 	tmuxMark := ui.Dim + " -- " + ui.Reset
-	if w.Branch != "" && tmux.Has() && tmux.WindowExists(session, project.Sanitize(w.Branch)) {
+	if w.Branch != "" && windows[project.Sanitize(w.Branch)] {
 		tmuxMark = ui.Green + "tmux" + ui.Reset
-	}
-
-	dirty := " "
-	if out, err := project.GitOut(w.Path, "status", "--porcelain"); err == nil && strings.TrimSpace(out) != "" {
-		dirty = ui.Yellow + "*" + ui.Reset
 	}
 
 	row := fmt.Sprintf("%s  %s %s%s%s  %s",
@@ -489,10 +544,28 @@ func cmdPrune(args []string) {
 	if cfg.ForgeEnabled() {
 		forgeMerged = forgeMergedBranches(p, cfg)
 	}
+	in := pruneInputs{
+		p: p, def: def, cwd: cwd, cfg: cfg, partial: partial,
+		merged:      mergedBranches(p, "origin/"+def),
+		forgeMerged: forgeMerged,
+	}
+
+	// Classify every worktree in parallel; each check may run git (squash
+	// detection, status), which is slow on large repos.
+	results := make([]*pruneCandidate, len(wts))
+	done := runParallel(len(wts), statusWorkers(), func(i int) {
+		w := wts[i]
+		if r := in.reason(w); r != "" {
+			results[i] = &pruneCandidate{w.Branch, w.Path, r, !p.WorktreeClean(w.Path)}
+		}
+	})
+
+	// Collect candidates in worktree order
 	var candidates []pruneCandidate
-	for _, w := range wts {
-		if r := pruneReason(p, w, def, cwd, cfg, forgeMerged, partial); r != "" {
-			candidates = append(candidates, pruneCandidate{w.Branch, w.Path, r, !p.WorktreeClean(w.Path)})
+	for i := range wts {
+		<-done[i]
+		if results[i] != nil {
+			candidates = append(candidates, *results[i])
 		}
 	}
 	if len(candidates) == 0 {
@@ -596,32 +669,44 @@ func printPruneCandidate(c pruneCandidate, note string) {
 	fmt.Fprintln(os.Stderr)
 }
 
-// pruneReason returns why a worktree is a prune candidate ("merged", "squashed",
+// pruneInputs holds the project-wide facts prune classifies worktrees against,
+// gathered once so per-worktree checks don't repeat them.
+type pruneInputs struct {
+	p           *project.Project
+	def, cwd    string
+	cfg         config.Config
+	merged      map[string]bool // branches whose tips are ancestors of origin/<def>
+	forgeMerged map[string]bool // head branches of merged PRs, per the forge
+	partial     bool
+}
+
+// reason returns why a worktree is a prune candidate ("merged", "squashed",
 // "forge", or "subject"), or "" when it should be kept. A worktree is never a
 // candidate when it is bare, is the default branch, or is the current directory.
-// Detached worktrees are judged by their HEAD commit (see detachedPruneReason).
-func pruneReason(p *project.Project, w project.Worktree, def, cwd string, cfg config.Config, forgeMerged map[string]bool, partial bool) string {
-	if w.Path == "" || w.Bare || w.Path == cwd {
+// Detached worktrees are judged by their HEAD commit (see detachedReason).
+func (in pruneInputs) reason(w project.Worktree) string {
+	p, cfg := in.p, in.cfg
+	if w.Path == "" || w.Bare || w.Path == in.cwd {
 		return ""
 	}
-	into := "origin/" + def
+	into := "origin/" + in.def
 	if w.Branch == "" {
-		return detachedPruneReason(p, w, into, cfg, partial)
+		return in.detachedReason(w, into)
 	}
-	if w.Branch == def {
+	if w.Branch == in.def {
 		return ""
 	}
-	if branchMerged(p, w.Branch, into) {
+	if in.merged[w.Branch] {
 		return "merged"
 	}
 	// Squash/rebase merges rewrite history, so ancestry misses them; fall back
 	// to patch-equivalence against origin/default. Skip on partial clones, where
 	// the patch-id diff would lazy-fetch blobs from the remote.
-	if cfg.SquashDetectionEnabled() && !partial && p.BranchSquashMerged(w.Branch, into) {
+	if cfg.SquashDetectionEnabled() && !in.partial && p.BranchSquashMerged(w.Branch, into) {
 		return "squashed"
 	}
 	// Authoritative merged-PR state from the forge, when configured.
-	if forgeMerged[w.Branch] {
+	if in.forgeMerged[w.Branch] {
 		return "forge"
 	}
 	// Otherwise keep it. A "gone" upstream (branch.<name>.remote set with no
@@ -636,12 +721,13 @@ func pruneReason(p *project.Project, w project.Worktree, def, cwd string, cfg co
 	return ""
 }
 
-// detachedPruneReason classifies a detached worktree by its HEAD commit, which no
+// detachedReason classifies a detached worktree by its HEAD commit, which no
 // branch names, so the forge can't be asked about it. Beyond ancestry and
 // patch-equivalence it accepts "subject": every commit only HEAD holds landed
 // upstream under the same subject, as when a commit checked out to test a merge
 // was then squash-merged against a newer default branch.
-func detachedPruneReason(p *project.Project, w project.Worktree, into string, cfg config.Config, partial bool) string {
+func (in pruneInputs) detachedReason(w project.Worktree, into string) string {
+	p, cfg, partial := in.p, in.cfg, in.partial
 	if !w.Detached || w.Head == "" {
 		return ""
 	}
@@ -704,21 +790,21 @@ func forgeMergedBranches(p *project.Project, cfg config.Config) map[string]bool 
 	return merged
 }
 
-func branchMerged(p *project.Project, branch, into string) bool {
-	out, err := project.GitOut(p.Base, "branch", "--merged", into)
+// mergedBranches returns the local branches whose tips are reachable from into,
+// listed with a single `git branch --merged`. It returns nil if git fails, so no
+// branch counts as merged by ancestry.
+func mergedBranches(p *project.Project, into string) map[string]bool {
+	out, err := project.GitOut(p.Base, "branch", "--merged", into, "--format=%(refname:short)")
 	if err != nil {
-		return false
+		return nil
 	}
+	merged := map[string]bool{}
 	for _, line := range strings.Split(out, "\n") {
-		fields := strings.Fields(line)
-		if len(fields) == 0 {
-			continue
-		}
-		if fields[len(fields)-1] == branch {
-			return true
+		if b := strings.TrimSpace(line); b != "" {
+			merged[b] = true
 		}
 	}
-	return false
+	return merged
 }
 
 func cmdRm(args []string) {
@@ -933,23 +1019,30 @@ func buildLaunchContext(name, dir string) recipe.Context {
 }
 
 func mustResolve() *project.Project {
+	p, _ := mustResolveWorktrees()
+	return p
+}
+
+// mustResolveWorktrees is mustResolve plus the reconciled worktree list, for
+// commands that enumerate worktrees anyway and can skip a second listing.
+func mustResolveWorktrees() (*project.Project, []project.Worktree) {
 	p, err := project.Resolve(mustGetwd())
 	if err != nil {
 		ui.Die(err.Error())
 	}
-	reconcileStale(p)
-	return p
+	return p, reconcileStale(p)
 }
 
 // reconcileStale clears git's leftover bookkeeping for worktree folders deleted
 // outside grove (e.g. `rm -rf`), so every command works from what's actually on
 // disk. It runs on project resolution rather than only in `grove list` so that
 // reused-branch flows (switch/open/path) don't trip over a vanished worktree
-// that git still thinks is checked out. Branch refs are kept.
-func reconcileStale(p *project.Project) {
-	pruned := p.ReconcileStale()
+// that git still thinks is checked out. Branch refs are kept. It returns the
+// worktree list as it stands after reconciling.
+func reconcileStale(p *project.Project) []project.Worktree {
+	pruned, wts := p.ReconcileStale()
 	if len(pruned) == 0 {
-		return
+		return wts
 	}
 	noun := "worktree"
 	if len(pruned) > 1 {
@@ -957,6 +1050,7 @@ func reconcileStale(p *project.Project) {
 	}
 	ui.Info(fmt.Sprintf("Reconciled %d removed %s: %s (branch refs kept).",
 		len(pruned), noun, strings.Join(pruned, ", ")))
+	return wts
 }
 
 func mustGetwd() string {
@@ -1187,7 +1281,10 @@ Usage:
   grove switch [BRANCH]          Like a bare BRANCH; no BRANCH opens an fzf picker
   grove path BRANCH              Resolve (creating if needed) BRANCH's worktree; print its path
   grove tmux                     Attach the project session, building a window per worktree
-  grove list | ls [-t] [--porcelain]  List worktrees with last commit time; -t newest first; --porcelain prints branch<TAB>path
+  grove list | ls [-t] [--porcelain] [--no-status]
+                                 List worktrees with last commit time and local changes (*);
+                                 -t newest first; --porcelain prints branch<TAB>path;
+                                 --no-status skips the local-changes check
   grove prune [--dry-run] [--force]   Remove merged worktrees (keeps branch refs); worktrees with local
                                  changes are kept unless --force discards them
   grove rm BRANCH [--force]      Remove a single worktree (keeps branch ref); --force discards local changes

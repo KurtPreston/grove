@@ -56,6 +56,26 @@ func WindowExists(session, win string) bool {
 	return false
 }
 
+// WindowNames returns the set of window names in the session, or an empty set
+// when tmux is missing or the session doesn't exist. Use it instead of calling
+// WindowExists in a loop, which shells out to tmux once per window.
+func WindowNames(session string) map[string]bool {
+	names := map[string]bool{}
+	if !Has() {
+		return names
+	}
+	o, err := out("list-windows", "-t", "="+session, "-F", "#{window_name}")
+	if err != nil {
+		return names
+	}
+	for _, name := range strings.Split(strings.TrimRight(o, "\n"), "\n") {
+		if name != "" {
+			names[name] = true
+		}
+	}
+	return names
+}
+
 // EnsureSession creates the detached project session with a placeholder window
 // if it does not already exist.
 func EnsureSession(session, dir string) {
