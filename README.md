@@ -135,7 +135,7 @@ for when and why to enable the recipe.
 | `grove path BRANCH` | Resolve (creating if needed) BRANCH's worktree and print its absolute path to stdout |
 | `grove tmux` | Attach the project's tmux session, building a window for every worktree |
 | `grove list` / `ls [-t] [--porcelain]` | List worktrees with each branch's last commit time; `-t` orders newest first; `--porcelain` prints `branch<TAB>path` |
-| `grove prune [--dry-run] [--force]` | Remove worktrees whose branches are merged, including squash/rebase merges (keeps branch refs); never-pushed branches are left alone. A worktree with local changes is kept unless `--force`/`-f` is passed. `--dry-run`/`-n` lists candidates without removing anything |
+| `grove prune [--dry-run] [--force]` | Remove worktrees whose branches are merged, including squash/rebase merges and detached worktrees whose commits landed (keeps branch refs); never-pushed branches are left alone. A worktree with local changes is kept unless `--force`/`-f` is passed. `--dry-run`/`-n` lists candidates without removing anything |
 | `grove rm BRANCH [--force]` | Remove a single worktree (keeps the branch ref); `--force` discards local changes |
 | `grove color BRANCH` | Print the deterministic color for a branch |
 | `grove launch` / `here [DIR]` | Run the `onOpen` recipes for `DIR` (or cwd) without a worktree — from the project's `grove.json` inside a grove project, otherwise from the user-level config (see [Launching any folder](#launching-any-folder)) |
@@ -555,6 +555,16 @@ changes unless you pass `--force`. A worktree is a candidate when its branch is:
   patch-equivalence so squash- and rebase-merged branches are caught even though
   their tips are not ancestors (on by default);
 - **forge** — matched to a merged pull request reported by the forge (opt-in).
+
+A detached worktree (`(no branch)` in `grove list`) is judged by its HEAD
+commit: **merged** if it is an ancestor of `origin/<default>`, **squashed** if
+its net diff is there, or **subject** if every non-merge commit that only HEAD
+holds (no branch, remote-tracking ref, or tag reaches it) landed in
+`origin/<default>` under the same subject, ignoring a trailing ` (#N)`. The
+subject check catches a commit checked out to test a merge and then
+squash-merged against a newer default branch, whose diff no longer matches. It
+is a heuristic, so it runs only with squash detection on, and prune still lists
+each candidate and asks before removing anything.
 
 A branch is never a candidate just because its upstream is "gone". grove points
 every branch at `origin/<branch>` for push/pull ergonomics, so a branch that was
