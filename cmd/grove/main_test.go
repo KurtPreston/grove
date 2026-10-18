@@ -133,6 +133,11 @@ func TestPruneReason(t *testing.T) {
 	gitCommit(t, base, "open.txt", "o", "o1")
 
 	gitDo(t, base, "checkout", "-q", "main")
+	openHead := gitRev(t, base, "feat-open")
+	c0 := gitRev(t, base, "main~3")
+
+	// protected: cut from main with no new commits, so it is an ancestor of main
+	gitDo(t, base, "branch", "release-1", "main~1")
 
 	const def = "main"
 	const otherCwd = "/some/other/cwd"
@@ -147,7 +152,7 @@ func TestPruneReason(t *testing.T) {
 		w           project.Worktree
 		cwd         string
 		cfg         config.Config
-		forgeMerged map[string]bool
+		forgeMerged map[string]string
 		partial     bool
 		want        string
 	}{
@@ -156,7 +161,10 @@ func TestPruneReason(t *testing.T) {
 		{"never-pushed upstream kept", wt("feat-unpushed"), otherCwd, std, nil, false, ""},
 		{"upstream present kept", wt("feat-upstream"), otherCwd, std, nil, false, ""},
 		{"open unmerged kept", wt("feat-open"), otherCwd, std, nil, false, ""},
-		{"forge merged", wt("feat-open"), otherCwd, std, map[string]bool{"feat-open": true}, false, "forge"},
+		{"forge merged", wt("feat-open"), otherCwd, std, map[string]string{"feat-open": openHead}, false, "forge"},
+		{"forge merged before newer commits kept", wt("feat-open"), otherCwd, std, map[string]string{"feat-open": c0}, false, ""},
+		{"protected branch kept", wt("release-1"), otherCwd, std, nil, false, ""},
+		{"protect overridable", wt("release-1"), otherCwd, config.Config{Prune: &config.PruneConfig{Protect: []string{}}}, nil, false, "merged"},
 		{"squash detection disabled", wt("feat-squash"), otherCwd, squashOff(), nil, false, ""},
 		{"partial clone skips squash detection", wt("feat-squash"), otherCwd, std, nil, true, ""},
 		{"default branch kept", wt("main"), otherCwd, std, nil, false, ""},
@@ -211,6 +219,74 @@ func TestSplitPruneCandidates(t *testing.T) {
 	}
 	if len(kept) != 0 {
 		t.Errorf("--force should keep nothing, got %q", branchList(kept))
+	}
+}
+
+// TestPruneBranchCandidates checks which local and origin branches prune deletes:
+// merged ones, minus the default branch, protected names, and branches a
+// remaining worktree still has checked out.
+func TestPruneBranchCandidates(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+	base := t.TempDir()
+	gitDo(t, base, "init", "-q", "-b", "main")
+	gitDo(t, base, "remote", "add", "origin", base)
+	p := &project.Project{Base: base, Dir: base}
+	gitCommit(t, base, "base.txt", "0", "c0")
+
+	// Merged local branches, one per checkout situation, plus a protected one
+	for _, b := range []string{"feat-merged", "feat-checked", "feat-removed", "release-1"} {
+		gitDo(t, base, "branch", b)
+	}
+
+	// An unmerged local branch, kept
+	gitDo(t, base, "checkout", "-q", "-b", "feat-open")
+	gitCommit(t, base, "open.txt", "o", "o1")
+	gitDo(t, base, "checkout", "-q", "main")
+	gitCommit(t, base, "next.txt", "n", "c1")
+
+	// origin: the default, a merged and an open branch, HEAD, and a merged
+	// branch on another remote that must not be mistaken for origin's
+	gitDo(t, base, "update-ref", "refs/remotes/origin/main", "main")
+	gitDo(t, base, "update-ref", "refs/remotes/origin/old", "main~1")
+	gitDo(t, base, "update-ref", "refs/remotes/origin/open", "feat-open")
+	gitDo(t, base, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main")
+	gitDo(t, base, "update-ref", "refs/remotes/upstream/open", "main~1")
+
+	in := pruneInputs{
+		p: p, def: "main", cwd: "/elsewhere", cfg: config.Config{},
+		merged: mergedBranches(p, "origin/main"),
+	}
+	wts := []project.Worktree{
+		{Path: base, Branch: "main"},
+		{Path: "/wt/feat-checked", Branch: "feat-checked"},
+		{Path: "/wt/feat-removed", Branch: "feat-removed"},
+	}
+	remove := []pruneCandidate{{branch: "feat-removed", path: "/wt/feat-removed", reason: "merged"}}
+
+	if got := branchList(in.localBranchCandidates(wts, remove)); got != "feat-merged,feat-removed" {
+		t.Errorf("local candidates = %q, want feat-merged,feat-removed", got)
+	}
+	if got := branchList(in.originBranchCandidates()); got != "origin/old" {
+		t.Errorf("origin candidates = %q, want origin/old", got)
+	}
+}
+
+// TestLocalPrompt pins the confirmation wording for each mix of work.
+func TestLocalPrompt(t *testing.T) {
+	tests := []struct {
+		worktrees, branches, dirty int
+		want                       string
+	}{
+		{2, 0, 0, "Remove 2 worktrees? [y/N] "},
+		{0, 1, 0, "Delete 1 local branch? [y/N] "},
+		{1, 3, 1, "Remove 1 worktree and delete 3 local branches? 1 has local changes that will be discarded. [y/N] "},
+	}
+	for _, tc := range tests {
+		if got := localPrompt(tc.worktrees, tc.branches, tc.dirty); got != tc.want {
+			t.Errorf("localPrompt(%d, %d, %d) = %q, want %q", tc.worktrees, tc.branches, tc.dirty, got, tc.want)
+		}
 	}
 }
 

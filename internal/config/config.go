@@ -12,6 +12,7 @@ import (
 	"errors"
 	"io/fs"
 	"os"
+	"path"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -128,7 +129,16 @@ type PruneConfig struct {
 	// Forge optionally consults a forge (via the gh CLI) for authoritative
 	// merged-PR state.
 	Forge *ForgeConfig `json:"forge,omitempty"`
+	// Protect lists branch-name globs prune never removes or deletes, locally or
+	// on origin. Defaults to DefaultPruneProtect when nil; the default branch is
+	// always protected.
+	Protect []string `json:"protect,omitempty"`
 }
+
+// DefaultPruneProtect is the prune.protect list used when none is configured:
+// long-lived branches that are often ancestors of the default branch without
+// being finished work.
+var DefaultPruneProtect = []string{"main", "master", "develop", "staging", "release*"}
 
 // ForgeConfig configures the optional forge PR check used by `grove prune`.
 type ForgeConfig struct {
@@ -161,6 +171,21 @@ func (c Config) ForgeRepo() string {
 		return ""
 	}
 	return c.Prune.Forge.Repo
+}
+
+// PruneProtected reports whether branch matches a prune.protect glob (or the
+// defaults when unset). A malformed glob matches nothing.
+func (c Config) PruneProtected(branch string) bool {
+	globs := DefaultPruneProtect
+	if c.Prune != nil && c.Prune.Protect != nil {
+		globs = c.Prune.Protect
+	}
+	for _, g := range globs {
+		if ok, _ := path.Match(g, branch); ok {
+			return true
+		}
+	}
+	return false
 }
 
 // BeforeCreateBranch returns the recipes gating brand-new branch creation, or
