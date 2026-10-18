@@ -135,7 +135,7 @@ for when and why to enable the recipe.
 | `grove path BRANCH` | Resolve (creating if needed) BRANCH's worktree and print its absolute path to stdout |
 | `grove tmux` | Attach the project's tmux session, building a window for every worktree |
 | `grove list` / `ls [-t] [--porcelain] [--no-status]` | List worktrees with each branch's last commit time and a `*` for local changes; `-t` orders newest first; `--porcelain` prints `branch<TAB>path`; `--no-status` skips the local-changes check (see [Listing large repos](#listing-large-repos)) |
-| `grove prune [--dry-run] [--force]` | Remove worktrees whose branches are merged, including squash/rebase merges and detached worktrees whose commits landed (keeps branch refs); never-pushed branches are left alone. A worktree with local changes is kept unless `--force`/`-f` is passed. `--dry-run`/`-n` lists candidates without removing anything |
+| `grove prune [--dry-run] [--force] [--keep-branches] [--remote \| --no-remote]` | Remove worktrees whose branches are merged, including squash/rebase merges and detached worktrees whose commits landed, and delete merged branches locally and on `origin` (see [Prune detection](#prune-detection)); never-pushed branches are left alone. A worktree with local changes is kept unless `--force`/`-f` is passed. `--keep-branches` removes only worktrees. `--remote`/`--no-remote` answer the `origin` prompt up front. `--dry-run`/`-n` lists candidates without removing anything |
 | `grove rm BRANCH [--force]` | Remove a single worktree (keeps the branch ref); `--force` discards local changes |
 | `grove color BRANCH` | Print the deterministic color for a branch |
 | `grove launch` / `here [DIR]` | Run the `onOpen` recipes for `DIR` (or cwd) without a worktree — from the project's `grove.json` inside a grove project, otherwise from the user-level config (see [Launching any folder](#launching-any-folder)) |
@@ -153,8 +153,9 @@ for you. Both leave a worktree with local changes (including modified submodule
 content) in place: `grove rm BRANCH` tells you to re-run with `--force`, and
 `grove prune` lists the branch under "kept because of local changes" and moves
 on. Pass `--force` to either one to discard those changes and remove the
-worktree anyway. The branch ref is always kept, so nothing committed is ever
-lost — but uncommitted work has no ref to survive on, and untracked files are not
+worktree anyway. Committed work survives either way: `grove rm` keeps the branch
+ref, and `grove prune` only touches branches whose work is already upstream. But
+uncommitted work has no ref to survive on, and untracked files are not
 recoverable from git at all, which is why `--force` is opt-in.
 
 ### Choosing the base branch for new branches
@@ -548,8 +549,9 @@ is non-fatal: grove warns and uses the defaults.
 
 ### Prune detection
 
-`grove prune` keeps branch refs, and keeps any candidate worktree that has local
-changes unless you pass `--force`. A worktree is a candidate when its branch is:
+`grove prune` cleans up worktrees and branches together. It keeps any candidate
+worktree that has local changes unless you pass `--force`. A worktree is a
+candidate when its branch is:
 
 - **merged** — an ancestor of `origin/<default>` (`git branch --merged`);
 - **squashed** — its net diff already exists in `origin/<default>`, detected via
@@ -575,7 +577,22 @@ or track field tells them apart. Pruning on that signal would discard
 never-pushed work, so grove removes a worktree only when its work is provably
 upstream (merged/squashed/forge).
 
-The optional `prune` block tunes the squash and forge checks:
+Branches are judged the same way. Prune deletes the branch of every worktree it
+removes, plus any other merged local branch that no remaining worktree has
+checked out. One `[y/N]` prompt covers worktrees and local branches. It also
+lists merged branches on `origin` and asks `[Y/n]` before deleting them there,
+since that changes the remote for everyone. `--remote` deletes them without
+asking, and `--no-remote` skips them. Without a terminal (and no flag), prune
+leaves `origin` alone. Pass `--keep-branches` to remove worktrees only and keep
+every branch ref.
+
+The default branch is never pruned, and neither is any branch matching a
+`prune.protect` glob (by default `main`, `master`, `develop`, `staging`, and
+`release*`). Those branches are often ancestors of the default branch — a
+release branch cut with no new commits yet — without being finished work.
+
+The optional `prune` block tunes the squash and forge checks and the protected
+branches:
 
 ```jsonc
 "prune": {
@@ -583,12 +600,14 @@ The optional `prune` block tunes the squash and forge checks:
   "forge": {
     "enabled": false,             // default; when true, consult the forge via the gh CLI
     "repo": "github.com/owner/repo" // optional; overrides the slug derived from origin
-  }
+  },
+  "protect": ["main", "master", "develop", "staging", "release*"] // default; branch globs prune never touches
 }
 ```
 
 The forge check runs one `gh pr list --state merged` query and treats any branch
-matching a merged PR's head as a candidate. It requires `gh` on `PATH` and
+matching a merged PR's head as a candidate, as long as the branch hasn't moved
+past the PR's head commit. It requires `gh` on `PATH` and
 authentication for the remote's host; if `gh` is missing, the repo can't be
 resolved, or the query fails, grove warns once and falls back to the git-only
 checks. Run `grove prune --dry-run` to preview candidates (with their reason)

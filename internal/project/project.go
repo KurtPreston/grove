@@ -471,20 +471,79 @@ func (p *Project) BranchList() []string {
 		seen[name] = true
 		out = append(out, name)
 	}
-	if o, err := GitOut(p.Base, "for-each-ref", "--format=%(refname:short)", "refs/heads"); err == nil {
-		for _, line := range strings.Split(o, "\n") {
-			add(strings.TrimSpace(line))
-		}
+	for _, b := range p.LocalBranches() {
+		add(b)
 	}
-	// Strip refs/remotes/origin/ from the full ref name. refname:short shortens
-	// origin/HEAD to bare "origin", which would slip past the HEAD filter.
-	if o, err := GitOut(p.Base, "for-each-ref", "--format=%(refname:lstrip=3)", "refs/remotes/origin"); err == nil {
-		for _, line := range strings.Split(o, "\n") {
-			add(strings.TrimSpace(line))
-		}
+	for _, b := range p.OriginBranches() {
+		add(b)
 	}
 	sort.Strings(out)
 	return out
+}
+
+// LocalBranches returns the names of every local branch, or nil if git fails.
+func (p *Project) LocalBranches() []string {
+	return refNames(p.Base, "--format=%(refname:short)", "refs/heads")
+}
+
+// OriginBranches returns origin's branch names with the origin/ prefix stripped,
+// skipping origin/HEAD (a symbolic alias, not a branch). It strips the full ref
+// name because refname:short shortens origin/HEAD to a bare "origin", which would
+// slip past the HEAD filter.
+func (p *Project) OriginBranches() []string {
+	var out []string
+	for _, b := range refNames(p.Base, "--format=%(refname:lstrip=3)", "refs/remotes/origin") {
+		if b != "HEAD" {
+			out = append(out, b)
+		}
+	}
+	return out
+}
+
+// refNames lists refs under prefix with `git for-each-ref`, one per line, in
+// the given format, dropping blank lines.
+func refNames(base, format, prefix string) []string {
+	o, err := GitOut(base, "for-each-ref", format, prefix)
+	if err != nil {
+		return nil
+	}
+	var out []string
+	for _, line := range strings.Split(o, "\n") {
+		if s := strings.TrimSpace(line); s != "" {
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
+// DeleteBranch force-deletes a local branch ref. Callers decide it is merged
+// first; -D is needed because `git branch -d` only accepts branches merged into
+// HEAD or their upstream, which says nothing about origin/<default>.
+func (p *Project) DeleteBranch(branch string) error {
+	return gitCombined(p.Base, "branch", "-D", branch)
+}
+
+// DeleteOriginBranch deletes branch from origin. A branch already gone from the
+// remote (deleted by someone else, or by the forge on merge) counts as success.
+func (p *Project) DeleteOriginBranch(branch string) error {
+	err := gitCombined(p.Base, "push", "--delete", "origin", branch)
+	if err != nil && strings.Contains(err.Error(), "remote ref does not exist") {
+		return nil
+	}
+	return err
+}
+
+// gitCombined runs `git -C dir args...` silently, folding git's output into the
+// returned error so callers can report (or inspect) why it failed.
+func gitCombined(dir string, args ...string) error {
+	ctx, cancel := gitContext()
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "git", append([]string{"-C", dir}, args...)...)
+	cmd.Env = gitBaseEnv()
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("%w: %s", err, strings.TrimSpace(string(out)))
+	}
+	return nil
 }
 
 // Clone creates a new project: a bare .base plus a worktree for the default

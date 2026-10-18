@@ -48,6 +48,11 @@
       "additionalProperties": false,
       "description": "Settings for `grove prune` merge detection.",
       "properties": {
+        "protect": {
+          "type": "array",
+          "description": "Branch-name globs prune never removes or deletes, locally or on origin (default: [\"main\", \"master\", \"develop\", \"staging\", \"release*\"]). The default branch is always protected.",
+          "items": { "type": "string" }
+        },
         "detectSquash": {
           "type": "boolean",
           "description": "Detect squash/rebase-merged branches via patch-equivalence against origin/<default> (default: true)."
