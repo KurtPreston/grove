@@ -538,3 +538,24 @@ func TestBaseResolverDefaultsWhenStdinIsDevNull(t *testing.T) {
 		t.Fatalf("baseResolver = %q, %v; want \"main\", nil", got, err)
 	}
 }
+
+// TestWantsHelp verifies -h/--help anywhere in a subcommand's args requests
+// help, so e.g. `grove path --help` never creates a "help" branch.
+func TestWantsHelp(t *testing.T) {
+	cases := map[string]struct {
+		args []string
+		want bool
+	}{
+		"long flag":      {[]string{"--help"}, true},
+		"short flag":     {[]string{"-h"}, true},
+		"after a branch": {[]string{"feature", "--help"}, true},
+		"bare word help": {[]string{"help"}, false},
+		"plain branch":   {[]string{"feature"}, false},
+		"no args":        {nil, false},
+	}
+	for name, c := range cases {
+		if got := wantsHelp(c.args); got != c.want {
+			t.Errorf("%s: wantsHelp(%v) = %v, want %v", name, c.args, got, c.want)
+		}
+	}
+}

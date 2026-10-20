@@ -375,6 +375,10 @@ func setUpstream(base, branch string) {
 // returned to the caller. This is the hook point for grove.json's
 // beforeCreateBranch bucket.
 func (p *Project) EnsureWorktree(branch string, copyFiles []string, pickBase func(def string) (string, error), beforeCreate func() error) (string, bool, error) {
+	// A leading dash means an unrecognized flag, never a branch name.
+	if strings.HasPrefix(branch, "-") {
+		return "", false, fmt.Errorf("unknown option '%s' (branch names cannot start with '-'); see 'grove help'", branch)
+	}
 	if dir, ok := p.WorktreePathFor(branch); ok {
 		ui.Info("Using existing worktree: " + dir)
 		if GitQuiet(dir, "pull", "--ff-only") {
