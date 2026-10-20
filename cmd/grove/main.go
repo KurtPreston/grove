@@ -216,9 +216,32 @@ func doOpen(p *project.Project, branch, filter, from string, force bool) {
 		ui.Die(err.Error())
 	}
 	ctx := buildContext(p, branch, dir, created)
+
+	// Update a reused worktree while onOpen runs, so the editor opens without
+	// waiting on the network.
+	waitPull := func() {}
+	if !created {
+		waitPull = startPull(dir, branch)
+	}
 	recipe.Run(filterRecipes(cfg.OnOpen(), filter), ctx)
+	waitPull()
 	if created || force {
 		recipe.Run(filterRecipes(cfg.AfterFirstOpen(), filter), ctx)
+	}
+}
+
+// startPull fast-forwards the worktree at dir in the background and returns a
+// function that waits for it and reports the outcome. Reporting is left to the
+// waiter so output never interleaves with whatever runs in the meantime.
+func startPull(dir, branch string) func() {
+	done := make(chan bool, 1)
+	go func() { done <- project.PullLatest(dir, branch) }()
+	return func() {
+		if <-done {
+			ui.Info("Pulled latest.")
+		} else {
+			ui.Warn("skipped pull (no upstream, offline, or not fast-forward).")
+		}
 	}
 }
 
@@ -301,9 +324,12 @@ func cmdPath(args []string) {
 	branch := trimSlash(args[0])
 	// nil beforeCreate: grove path is used by scripts/tooling, so it never
 	// runs the (interactive-leaning, abortable) beforeCreateBranch bucket.
-	dir, _, err := p.EnsureWorktree(branch, loadCfg(p).Copy, baseResolver(p, from), nil)
+	dir, created, err := p.EnsureWorktree(branch, loadCfg(p).Copy, baseResolver(p, from), nil)
 	if err != nil {
 		ui.Die(err.Error())
+	}
+	if !created {
+		startPull(dir, branch)()
 	}
 	fmt.Println(dir)
 }
