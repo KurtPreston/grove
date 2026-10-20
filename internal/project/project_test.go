@@ -584,3 +584,50 @@ func mustGitOut(t *testing.T, dir string, args ...string) string {
 	}
 	return out
 }
+
+// TestPullLatestFetchesOnlyUpstream verifies PullLatest fast-forwards a
+// worktree to its upstream without fetching the remote's other branches.
+func TestPullLatestFetchesOnlyUpstream(t *testing.T) {
+	p := newTestProject(t)
+	src := filepath.Join(filepath.Dir(p.Dir), "src")
+
+	// Track origin like a grove clone, with a main worktree and a second branch.
+	runGit(t, src, "branch", "other")
+	runGit(t, p.Base, "config", "remote.origin.fetch", "+refs/heads/*:refs/remotes/origin/*")
+	runGit(t, p.Base, "fetch", "-q", "origin")
+	dir := filepath.Join(p.Dir, "main")
+	runGit(t, p.Base, "worktree", "add", "-q", dir, "main")
+	runGit(t, p.Base, "config", "branch.main.remote", "origin")
+	runGit(t, p.Base, "config", "branch.main.merge", "refs/heads/main")
+	staleOther := revParse(t, p.Base, "refs/remotes/origin/other")
+
+	// Advance both branches on origin.
+	runGit(t, src, "commit", "-q", "--allow-empty", "-m", "main moves")
+	runGit(t, src, "checkout", "-q", "other")
+	runGit(t, src, "commit", "-q", "--allow-empty", "-m", "other moves")
+	runGit(t, src, "checkout", "-q", "main")
+
+	// main fast-forwards; origin/other is left untouched.
+	if !PullLatest(dir, "main") {
+		t.Fatal("PullLatest(main) = false, want true")
+	}
+	if got, want := revParse(t, dir, "HEAD"), revParse(t, src, "main"); got != want {
+		t.Errorf("worktree HEAD = %s, want origin main %s", got, want)
+	}
+	if got := revParse(t, p.Base, "refs/remotes/origin/other"); got != staleOther {
+		t.Errorf("origin/other = %s, want unfetched %s", got, staleOther)
+	}
+
+	// A diverged worktree is left alone rather than merged.
+	runGit(t, dir, "commit", "-q", "--allow-empty", "-m", "local work")
+	runGit(t, src, "commit", "-q", "--allow-empty", "-m", "main moves again")
+	if PullLatest(dir, "main") {
+		t.Error("PullLatest on a diverged branch = true, want false")
+	}
+
+	// A branch with no upstream reports false without touching anything.
+	runGit(t, p.Base, "config", "--unset", "branch.main.remote")
+	if PullLatest(dir, "main") {
+		t.Error("PullLatest with no upstream = true, want false")
+	}
+}

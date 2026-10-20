@@ -356,11 +356,39 @@ func setUpstream(base, branch string) {
 	_ = Git(base, "config", "branch."+branch+".merge", want)
 }
 
+// PullLatest fast-forwards the worktree at dir (checked out on branch) to its
+// upstream, reporting whether it succeeded. Unlike `git pull`, which fetches
+// every branch on the remote, it fetches only the upstream branch, which keeps
+// reopening a worktree fast in repositories with thousands of active branches.
+// It is quiet, so it is safe to run alongside other work.
+func PullLatest(dir, branch string) bool {
+	// Resolve the upstream; without one there's nothing to pull.
+	remote, _ := GitOut(dir, "config", "--get", "branch."+branch+".remote")
+	merge, _ := GitOut(dir, "config", "--get", "branch."+branch+".merge")
+	remote, merge = strings.TrimSpace(remote), strings.TrimSpace(merge)
+	if remote == "" || merge == "" {
+		return false
+	}
+
+	// A "." remote is a local upstream: nothing to fetch, merge it directly.
+	if remote == "." {
+		return GitQuiet(dir, "merge", "--ff-only", "--quiet", merge)
+	}
+
+	// Fetch just that branch, then fast-forward to it as `git pull` would. The
+	// remote's fetch refspec still updates its tracking ref (e.g. origin/main).
+	if !GitQuiet(dir, "fetch", "--quiet", remote, merge) {
+		return false
+	}
+	return GitQuiet(dir, "merge", "--ff-only", "--quiet", "FETCH_HEAD")
+}
+
 // EnsureWorktree returns the worktree dir for branch, creating it if needed.
 // copyFiles are untracked files copied from the default-branch worktree into
 // freshly created ones. The returned bool reports whether the worktree was
 // created on this call (vs. reused), so callers can drive one-time
-// afterFirstOpen behavior.
+// afterFirstOpen behavior. A reused worktree is returned as-is; callers that
+// want it updated call PullLatest.
 //
 // pickBase chooses which branch a brand-new branch is based off. It is called
 // only when the branch exists neither locally nor on origin — reusing an
@@ -381,11 +409,6 @@ func (p *Project) EnsureWorktree(branch string, copyFiles []string, pickBase fun
 	}
 	if dir, ok := p.WorktreePathFor(branch); ok {
 		ui.Info("Using existing worktree: " + dir)
-		if GitQuiet(dir, "pull", "--ff-only") {
-			ui.Info("Pulled latest.")
-		} else {
-			ui.Warn("skipped pull (no upstream or not fast-forward).")
-		}
 		return dir, false, nil
 	}
 
