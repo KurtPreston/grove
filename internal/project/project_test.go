@@ -414,6 +414,22 @@ func TestEnsureWorktreeBeforeCreateAbortsOnError(t *testing.T) {
 	}
 }
 
+// TestEnsureWorktreeRejectsFlagLikeBranch verifies an unrecognized flag such as
+// --verbose is refused instead of silently becoming a new branch and worktree.
+func TestEnsureWorktreeRejectsFlagLikeBranch(t *testing.T) {
+	p := newTestProject(t)
+
+	// Every dash-prefixed name errors before anything is created
+	for _, name := range []string{"--verbose", "-x"} {
+		if _, _, err := p.EnsureWorktree(name, nil, baseDefault, nil); err == nil {
+			t.Errorf("EnsureWorktree(%q) succeeded, want error", name)
+		}
+		if pathExists(filepath.Join(p.Dir, Sanitize(name))) {
+			t.Errorf("worktree dir for %q was created", name)
+		}
+	}
+}
+
 // TestEnsureWorktreeBeforeCreateSkippedForExistingBranch verifies beforeCreate
 // only gates brand-new branches: reusing a branch that already exists locally
 // must not consult it, since there is nothing left to abort.

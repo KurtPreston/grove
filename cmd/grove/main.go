@@ -62,6 +62,13 @@ func main() {
 		cmd = args[0]
 	}
 
+	// `grove SUBCOMMAND --help` shows help rather than treating the flag as an
+	// argument (e.g. creating a branch named "help").
+	if cmd != "__complete" && len(args) > 1 && wantsHelp(args[1:]) {
+		usage()
+		return
+	}
+
 	switch cmd {
 	case "clone":
 		cmdClone(args[1:])
@@ -235,6 +242,16 @@ func filterRecipes(recipes []config.RecipeConfig, csv string) []config.RecipeCon
 		}
 	}
 	return out
+}
+
+// wantsHelp reports whether args request help via -h or --help.
+func wantsHelp(args []string) bool {
+	for _, a := range args {
+		if a == "-h" || a == "--help" {
+			return true
+		}
+	}
+	return false
 }
 
 // popForce removes --force/-f from args, reporting whether it was present.
