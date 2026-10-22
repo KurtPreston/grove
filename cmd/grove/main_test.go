@@ -56,8 +56,8 @@ func squashOff() config.Config {
 // stands up a branch for each outcome, freezes an origin/main tracking ref to
 // represent the upstream default, and asserts pruneInputs.reason classifies each one.
 //
-// A plain (non-bare) repo doubles as p.Base: pruneInputs.reason only shells git against
-// it, and a working repo makes the merges/tracking config easy to script. The
+// A plain repo's .git directory doubles as p.Base: pruneInputs.reason only shells
+// git against it, and its worktree makes the merges/tracking config easy to script. The
 // origin/main ref is synthesized with update-ref instead of a second remote so
 // the "merged", "squashed", "never pushed", and "upstream present" states are
 // exact.
@@ -74,7 +74,7 @@ func TestPruneReason(t *testing.T) {
 	// branch@{upstream} maps refs/heads/* to refs/remotes/origin/*, matching a
 	// real grove clone. Without it, @{upstream} can't resolve a tracking ref.
 	gitDo(t, base, "remote", "add", "origin", base)
-	p := &project.Project{Base: base, Dir: base}
+	p := &project.Project{Base: filepath.Join(base, ".git"), Dir: base}
 
 	gitCommit(t, base, "base.txt", "0", "c0")
 
@@ -232,7 +232,7 @@ func TestPruneBranchCandidates(t *testing.T) {
 	base := t.TempDir()
 	gitDo(t, base, "init", "-q", "-b", "main")
 	gitDo(t, base, "remote", "add", "origin", base)
-	p := &project.Project{Base: base, Dir: base}
+	p := &project.Project{Base: filepath.Join(base, ".git"), Dir: base}
 	gitCommit(t, base, "base.txt", "0", "c0")
 
 	// Merged local branches, one per checkout situation, plus a protected one
@@ -376,8 +376,8 @@ func TestListShowsCommitAgeAndSortsWithT(t *testing.T) {
 	}
 	base := filepath.Join(proj, ".base")
 	gitDo(t, proj, "clone", "-q", "--bare", src, base)
-	gitDo(t, base, "worktree", "add", filepath.Join(proj, "older"), "main")
-	gitDo(t, base, "worktree", "add", "-b", "newer", filepath.Join(proj, "newer"))
+	gitDo(t, base, "--git-dir=.", "worktree", "add", filepath.Join(proj, "older"), "main")
+	gitDo(t, base, "--git-dir=.", "worktree", "add", "-b", "newer", filepath.Join(proj, "newer"))
 	gitDo(t, filepath.Join(proj, "older"), "checkout", "-q", "-b", "older")
 	gitCommitDated(t, filepath.Join(proj, "older"), "2020-01-01 00:00:00 +0000", "old.txt", "old", "old")
 	gitCommitDated(t, filepath.Join(proj, "newer"), "2021-06-15 12:00:00 +0000", "new.txt", "new", "new")

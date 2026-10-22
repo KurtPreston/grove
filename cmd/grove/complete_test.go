@@ -59,14 +59,14 @@ func setupCompleteProject(t *testing.T) (projectDir, worktreeDir string) {
 	gitDo(t, proj, "clone", "-q", "--bare", src, base)
 
 	worktree := filepath.Join(proj, "main")
-	gitDo(t, base, "worktree", "add", worktree, "main")
+	gitDo(t, base, "--git-dir=.", "worktree", "add", worktree, "main")
 
 	gitDo(t, worktree, "checkout", "-q", "-b", "salsa-feature")
 	gitCommit(t, worktree, "feat.txt", "1", "c1")
 	gitDo(t, worktree, "checkout", "-q", "main")
 
-	gitDo(t, base, "update-ref", "refs/remotes/origin/main", "main")
-	gitDo(t, base, "update-ref", "refs/remotes/origin/remote-only", "main")
+	gitDo(t, base, "--git-dir=.", "update-ref", "refs/remotes/origin/main", "main")
+	gitDo(t, base, "--git-dir=.", "update-ref", "refs/remotes/origin/remote-only", "main")
 
 	return proj, worktree
 }

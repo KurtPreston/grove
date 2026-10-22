@@ -26,6 +26,13 @@ func runGit(t *testing.T, dir string, args ...string) {
 	}
 }
 
+// runBaseGit runs git against the bare repository at base. It passes --git-dir
+// explicitly, as grove does, so tests also pass under safe.bareRepository=explicit.
+func runBaseGit(t *testing.T, base string, args ...string) {
+	t.Helper()
+	runGit(t, base, append([]string{"--git-dir=."}, args...)...)
+}
+
 // newTestProject builds a grove-shaped project (bare .base + worktree folders)
 // under a temp dir and returns it. It seeds one commit so worktrees can be added.
 func newTestProject(t *testing.T, branches ...string) *Project {
@@ -50,7 +57,7 @@ func newTestProject(t *testing.T, branches ...string) *Project {
 
 	p := &Project{Base: base, Dir: proj}
 	for _, b := range branches {
-		runGit(t, base, "worktree", "add", "-q", "-b", b, filepath.Join(proj, b))
+		runBaseGit(t, base, "worktree", "add", "-q", "-b", b, filepath.Join(proj, b))
 	}
 	return p
 }
@@ -168,7 +175,7 @@ func TestReconcileStalePrunesDeletedDirAndKeepsBranch(t *testing.T) {
 		t.Errorf("feature-b worktree should still be listed")
 	}
 	// ...and the branch ref is kept (grove never deletes branches).
-	if !GitQuiet(p.Base, "show-ref", "--verify", "--quiet", "refs/heads/feature-a") {
+	if !GitQuiet(p.Base, "--git-dir=.", "show-ref", "--verify", "--quiet", "refs/heads/feature-a") {
 		t.Errorf("branch ref feature-a should be kept after reconcile")
 	}
 
@@ -189,8 +196,8 @@ func mustWorktrees(t *testing.T, p *Project) []Worktree {
 
 // newMergeRepo builds a plain (non-bare) repo with one commit on main and a
 // persisted git identity. BranchSquashMerged only shells out against the repo,
-// so a working repo — where commits and merges are easy to script — stands in
-// for the bare .base here. The local identity/gpgsign config matters because
+// so a working repo's .git directory stands in for the bare .base here while
+// commits and merges use its worktree. The local identity/gpgsign config matters because
 // BranchSquashMerged's own `commit-tree` call runs without grove's test flags.
 func newMergeRepo(t *testing.T) *Project {
 	t.Helper()
@@ -202,7 +209,7 @@ func newMergeRepo(t *testing.T) *Project {
 	runGit(t, dir, "config", "user.email", "grove@test")
 	runGit(t, dir, "config", "user.name", "grove")
 	runGit(t, dir, "config", "commit.gpgsign", "false")
-	return &Project{Base: dir, Dir: dir}
+	return &Project{Base: filepath.Join(dir, ".git"), Dir: dir}
 }
 
 // commitFile writes name in repo and commits it. Each branch below touches a
@@ -222,7 +229,7 @@ func commitFile(t *testing.T, repo, name, content, msg string) {
 // already present there (squash and rebase merges).
 func TestBranchSquashMerged(t *testing.T) {
 	p := newMergeRepo(t)
-	base := p.Base
+	base := p.Dir
 	commitFile(t, base, "base.txt", "0", "c0")
 
 	// Squash-merge: the branch's change lands on main as one new commit; the
@@ -277,7 +284,7 @@ func TestBranchSquashMerged(t *testing.T) {
 // to assert the branch.<name>.remote/merge that make a branch pushable.
 func gitConfig(t *testing.T, base, key string) string {
 	t.Helper()
-	out, err := GitOut(base, "config", "--get", key)
+	out, err := GitOut(base, "--git-dir=.", "config", "--get", key)
 	if err != nil {
 		return ""
 	}
@@ -311,7 +318,7 @@ func TestEnsureWorktreeSetsUpstream(t *testing.T) {
 
 	// Path: a local branch that already exists in the bare repo with no tracking
 	// config (e.g. carried over from a full clone).
-	runGit(t, p.Base, "branch", "local/only", "main")
+	runBaseGit(t, p.Base, "branch", "local/only", "main")
 	if _, _, err := p.EnsureWorktree("local/only", nil, baseDefault, nil); err != nil {
 		t.Fatalf("EnsureWorktree(local/only): %v", err)
 	}
@@ -326,9 +333,9 @@ func baseDefault(def string) (string, error) { return def, nil }
 // upstream a branch was already deliberately configured to track.
 func TestEnsureWorktreeKeepsExistingUpstream(t *testing.T) {
 	p := newTestProject(t)
-	runGit(t, p.Base, "branch", "tracked", "main")
-	runGit(t, p.Base, "config", "branch.tracked.remote", "upstream")
-	runGit(t, p.Base, "config", "branch.tracked.merge", "refs/heads/somewhere")
+	runBaseGit(t, p.Base, "branch", "tracked", "main")
+	runBaseGit(t, p.Base, "config", "branch.tracked.remote", "upstream")
+	runBaseGit(t, p.Base, "config", "branch.tracked.merge", "refs/heads/somewhere")
 
 	if _, _, err := p.EnsureWorktree("tracked", nil, baseDefault, nil); err != nil {
 		t.Fatalf("EnsureWorktree(tracked): %v", err)
@@ -349,9 +356,9 @@ func TestEnsureWorktreeKeepsExistingUpstream(t *testing.T) {
 // unlike the deliberate different-remote case above, which it preserves.
 func TestEnsureWorktreeFixesBaseBranchUpstream(t *testing.T) {
 	p := newTestProject(t)
-	runGit(t, p.Base, "branch", "feature/forked", "main")
-	runGit(t, p.Base, "config", "branch.feature/forked.remote", "origin")
-	runGit(t, p.Base, "config", "branch.feature/forked.merge", "refs/heads/main")
+	runBaseGit(t, p.Base, "branch", "feature/forked", "main")
+	runBaseGit(t, p.Base, "config", "branch.feature/forked.remote", "origin")
+	runBaseGit(t, p.Base, "config", "branch.feature/forked.merge", "refs/heads/main")
 
 	if _, _, err := p.EnsureWorktree("feature/forked", nil, baseDefault, nil); err != nil {
 		t.Fatalf("EnsureWorktree(feature/forked): %v", err)
@@ -363,6 +370,17 @@ func TestEnsureWorktreeFixesBaseBranchUpstream(t *testing.T) {
 func revParse(t *testing.T, dir, rev string) string {
 	t.Helper()
 	out, err := GitOut(dir, "rev-parse", rev)
+	if err != nil {
+		t.Fatalf("rev-parse %s: %v", rev, err)
+	}
+	return strings.TrimSpace(out)
+}
+
+// baseRevParse resolves rev in the bare repository at base, addressing it
+// explicitly so it works under safe.bareRepository=explicit.
+func baseRevParse(t *testing.T, base, rev string) string {
+	t.Helper()
+	out, err := GitOut(base, "--git-dir=.", "rev-parse", rev)
 	if err != nil {
 		t.Fatalf("rev-parse %s: %v", rev, err)
 	}
@@ -384,11 +402,11 @@ func TestEnsureWorktreeBasesOffChosenBranch(t *testing.T) {
 		t.Fatalf("EnsureWorktree(feature/off-branch1): %v", err)
 	}
 
-	newTip := revParse(t, p.Base, "feature/off-branch1")
-	if want := revParse(t, p.Base, "branch1"); newTip != want {
+	newTip := baseRevParse(t, p.Base, "feature/off-branch1")
+	if want := baseRevParse(t, p.Base, "branch1"); newTip != want {
 		t.Errorf("new branch tip = %s, want branch1 tip %s", newTip, want)
 	}
-	if mainTip := revParse(t, p.Base, "main"); newTip == mainTip {
+	if mainTip := baseRevParse(t, p.Base, "main"); newTip == mainTip {
 		t.Errorf("new branch tip should differ from main (%s); it looks based off main, not branch1", mainTip)
 	}
 	assertTracksOrigin(t, p.Base, "feature/off-branch1")
@@ -406,7 +424,7 @@ func TestEnsureWorktreeBeforeCreateAbortsOnError(t *testing.T) {
 	if !errors.Is(err, wantErr) {
 		t.Fatalf("EnsureWorktree error = %v, want %v", err, wantErr)
 	}
-	if GitQuiet(p.Base, "show-ref", "--verify", "--quiet", "refs/heads/feature/new") {
+	if GitQuiet(p.Base, "--git-dir=.", "show-ref", "--verify", "--quiet", "refs/heads/feature/new") {
 		t.Error("branch feature/new was created despite beforeCreate returning an error")
 	}
 	if pathExists(filepath.Join(p.Dir, "feature", "new")) {
@@ -435,7 +453,7 @@ func TestEnsureWorktreeRejectsFlagLikeBranch(t *testing.T) {
 // must not consult it, since there is nothing left to abort.
 func TestEnsureWorktreeBeforeCreateSkippedForExistingBranch(t *testing.T) {
 	p := newTestProject(t)
-	runGit(t, p.Base, "branch", "local/only", "main")
+	runBaseGit(t, p.Base, "branch", "local/only", "main")
 
 	called := false
 	if _, _, err := p.EnsureWorktree("local/only", nil, baseDefault, func() error {
@@ -471,11 +489,43 @@ func TestEnsureWorktreeWithExplicitBareRepository(t *testing.T) {
 	t.Setenv("GIT_CONFIG_VALUE_0", "explicit")
 
 	// A new branch must resolve main and land on main's tip
-	if _, _, err := p.EnsureWorktree("feature", nil, nil, nil); err != nil {
+	dir, _, err := p.EnsureWorktree("feature", nil, nil, nil)
+	if err != nil {
 		t.Fatalf("EnsureWorktree(feature): %v", err)
 	}
-	if got, want := revParse(t, p.Base, "feature"), revParse(t, p.Base, "main"); got != want {
+	if got, want := revParse(t, dir, "feature"), revParse(t, dir, "main"); got != want {
 		t.Errorf("feature tip = %s, want main tip %s", got, want)
+	}
+}
+
+// TestWorktreeWithGitLikeFiles verifies that project files named HEAD and
+// objects/ in a worktree don't make grove treat it as a bare repository. Git
+// commands there must still use the worktree's own .git file.
+func TestWorktreeWithGitLikeFiles(t *testing.T) {
+	p := newTestProject(t)
+	dir, _, err := p.EnsureWorktree("feature", nil, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Project files must not redirect Git away from the worktree's .git file.
+	if err := os.WriteFile(filepath.Join(dir, "HEAD"), []byte("project data\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(filepath.Join(dir, "objects"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if got := WorktreeDirtiness(context.Background(), dir); got != Dirty {
+		t.Errorf("worktree with project files = %v, want Dirty", got)
+	}
+	if got := strings.TrimSpace(mustGitOut(t, dir, "status", "--porcelain")); got != "?? HEAD" {
+		t.Errorf("status = %q, want untracked HEAD", got)
+	}
+	if err := Git(dir, "add", "HEAD"); err != nil {
+		t.Fatal(err)
+	}
+	if !GitQuiet(dir, "ls-files", "--error-unmatch", "HEAD") {
+		t.Error("HEAD was not staged in the worktree")
 	}
 }
 
@@ -508,9 +558,9 @@ func TestBranchListSkipsOriginHEAD(t *testing.T) {
 	p := newTestProject(t)
 
 	// Fake a fetched origin with a symbolic HEAD and a slashed branch
-	runGit(t, p.Base, "update-ref", "refs/remotes/origin/remote-only", "HEAD")
-	runGit(t, p.Base, "update-ref", "refs/remotes/origin/feature/x", "HEAD")
-	runGit(t, p.Base, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/remote-only")
+	runBaseGit(t, p.Base, "update-ref", "refs/remotes/origin/remote-only", "HEAD")
+	runBaseGit(t, p.Base, "update-ref", "refs/remotes/origin/feature/x", "HEAD")
+	runBaseGit(t, p.Base, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/remote-only")
 
 	// Collect the list and check for the alias and the real branches
 	got := map[string]bool{}
@@ -614,13 +664,13 @@ func TestPullLatestFetchesOnlyUpstream(t *testing.T) {
 
 	// Track origin like a grove clone, with a main worktree and a second branch.
 	runGit(t, src, "branch", "other")
-	runGit(t, p.Base, "config", "remote.origin.fetch", "+refs/heads/*:refs/remotes/origin/*")
-	runGit(t, p.Base, "fetch", "-q", "origin")
+	runBaseGit(t, p.Base, "config", "remote.origin.fetch", "+refs/heads/*:refs/remotes/origin/*")
+	runBaseGit(t, p.Base, "fetch", "-q", "origin")
 	dir := filepath.Join(p.Dir, "main")
-	runGit(t, p.Base, "worktree", "add", "-q", dir, "main")
-	runGit(t, p.Base, "config", "branch.main.remote", "origin")
-	runGit(t, p.Base, "config", "branch.main.merge", "refs/heads/main")
-	staleOther := revParse(t, p.Base, "refs/remotes/origin/other")
+	runBaseGit(t, p.Base, "worktree", "add", "-q", dir, "main")
+	runBaseGit(t, p.Base, "config", "branch.main.remote", "origin")
+	runBaseGit(t, p.Base, "config", "branch.main.merge", "refs/heads/main")
+	staleOther := baseRevParse(t, p.Base, "refs/remotes/origin/other")
 
 	// Advance both branches on origin.
 	runGit(t, src, "commit", "-q", "--allow-empty", "-m", "main moves")
@@ -635,7 +685,7 @@ func TestPullLatestFetchesOnlyUpstream(t *testing.T) {
 	if got, want := revParse(t, dir, "HEAD"), revParse(t, src, "main"); got != want {
 		t.Errorf("worktree HEAD = %s, want origin main %s", got, want)
 	}
-	if got := revParse(t, p.Base, "refs/remotes/origin/other"); got != staleOther {
+	if got := baseRevParse(t, p.Base, "refs/remotes/origin/other"); got != staleOther {
 		t.Errorf("origin/other = %s, want unfetched %s", got, staleOther)
 	}
 
@@ -647,7 +697,7 @@ func TestPullLatestFetchesOnlyUpstream(t *testing.T) {
 	}
 
 	// A branch with no upstream reports false without touching anything.
-	runGit(t, p.Base, "config", "--unset", "branch.main.remote")
+	runBaseGit(t, p.Base, "config", "--unset", "branch.main.remote")
 	if PullLatest(dir, "main") {
 		t.Error("PullLatest with no upstream = true, want false")
 	}

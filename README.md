@@ -26,6 +26,10 @@ Responsibilities are deliberately separated:
 At runtime grove needs `git`; `tmux` enables the `tmux` recipe and `fzf` enables
 the interactive picker.
 
+Grove addresses its base repository with an explicit `--git-dir`, so it works
+with `safe.bareRepository=explicit` without relaxing that setting. Worktree
+commands use normal Git discovery, regardless of project filenames.
+
 ### Prebuilt binary (no Go)
 
 ```sh
