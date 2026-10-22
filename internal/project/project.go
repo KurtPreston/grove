@@ -56,6 +56,8 @@ func gitContext() (context.Context, context.CancelFunc) {
 }
 
 // Git runs `git -C dir args...`, streaming chatter to stderr.
+// Callers targeting a known Git directory pass --git-dir=. explicitly to
+// support safe.bareRepository=explicit without inspecting worktree contents.
 func Git(dir string, args ...string) error {
 	ctx, cancel := gitContext()
 	defer cancel()
@@ -103,10 +105,10 @@ func GitPlain(args ...string) error {
 // clones, blob-reading commands (e.g. `git cherry`) would otherwise lazy-fetch
 // from the remote, so callers can skip that work.
 func (p *Project) IsPartialClone() bool {
-	if v, _ := GitOut(p.Base, "config", "--get", "remote.origin.promisor"); strings.TrimSpace(v) == "true" {
+	if v, _ := GitOut(p.Base, "--git-dir=.", "config", "--get", "remote.origin.promisor"); strings.TrimSpace(v) == "true" {
 		return true
 	}
-	if v, _ := GitOut(p.Base, "config", "--get", "remote.origin.partialclonefilter"); strings.TrimSpace(v) != "" {
+	if v, _ := GitOut(p.Base, "--git-dir=.", "config", "--get", "remote.origin.partialclonefilter"); strings.TrimSpace(v) != "" {
 		return true
 	}
 	return false
@@ -156,7 +158,7 @@ func Resolve(start string) (*Project, error) {
 
 // DefaultBranch returns the bare repo's HEAD branch (the upstream default).
 func (p *Project) DefaultBranch() string {
-	if out, err := GitOut(p.Base, "symbolic-ref", "--short", "HEAD"); err == nil {
+	if out, err := GitOut(p.Base, "--git-dir=.", "symbolic-ref", "--short", "HEAD"); err == nil {
 		if b := strings.TrimSpace(out); b != "" {
 			return b
 		}
@@ -188,7 +190,7 @@ type Worktree struct {
 
 // Worktrees parses the porcelain worktree list for this project.
 func (p *Project) Worktrees() ([]Worktree, error) {
-	out, err := GitOut(p.Base, "worktree", "list", "--porcelain")
+	out, err := GitOut(p.Base, "--git-dir=.", "worktree", "list", "--porcelain")
 	if err != nil {
 		return nil, err
 	}
@@ -228,7 +230,7 @@ func (p *Project) Worktrees() ([]Worktree, error) {
 // keyed by full SHA. Missing or unreadable SHAs are omitted.
 func (p *Project) CommitTimes(heads []string) map[string]time.Time {
 	seen := make(map[string]bool, len(heads))
-	args := []string{"log", "--no-walk", "--format=%H %ct"}
+	args := []string{"--git-dir=.", "log", "--no-walk", "--format=%H %ct"}
 	for _, h := range heads {
 		if h == "" || seen[h] {
 			continue
@@ -311,7 +313,7 @@ func (p *Project) ReconcileStale() (pruned []string, wts []Worktree) {
 	if len(stale) == 0 {
 		return nil, wts
 	}
-	if !GitQuiet(p.Base, "worktree", "prune") {
+	if !GitQuiet(p.Base, "--git-dir=.", "worktree", "prune") {
 		return nil, wts
 	}
 	return stale, live
@@ -339,8 +341,8 @@ func (p *Project) ReconcileStale() (pruned []string, wts []Worktree) {
 // left untouched — grove only manages same-repo tracking.
 func setUpstream(base, branch string) {
 	want := "refs/heads/" + branch
-	remoteOut, _ := GitOut(base, "config", "--get", "branch."+branch+".remote")
-	mergeOut, _ := GitOut(base, "config", "--get", "branch."+branch+".merge")
+	remoteOut, _ := GitOut(base, "--git-dir=.", "config", "--get", "branch."+branch+".remote")
+	mergeOut, _ := GitOut(base, "--git-dir=.", "config", "--get", "branch."+branch+".merge")
 	remote := strings.TrimSpace(remoteOut)
 	merge := strings.TrimSpace(mergeOut)
 
@@ -352,8 +354,8 @@ func setUpstream(base, branch string) {
 	if remote != "" && remote != "origin" {
 		return
 	}
-	_ = Git(base, "config", "branch."+branch+".remote", "origin")
-	_ = Git(base, "config", "branch."+branch+".merge", want)
+	_ = Git(base, "--git-dir=.", "config", "branch."+branch+".remote", "origin")
+	_ = Git(base, "--git-dir=.", "config", "branch."+branch+".merge", want)
 }
 
 // PullLatest fast-forwards the worktree at dir (checked out on branch) to its
@@ -413,7 +415,7 @@ func (p *Project) EnsureWorktree(branch string, copyFiles []string, pickBase fun
 	}
 
 	ui.Info("Fetching latest...")
-	if !GitQuiet(p.Base, "fetch", "origin") {
+	if !GitQuiet(p.Base, "--git-dir=.", "fetch", "origin") {
 		ui.Warn("fetch failed; using local refs.")
 	}
 
@@ -424,15 +426,15 @@ func (p *Project) EnsureWorktree(branch string, copyFiles []string, pickBase fun
 	}
 
 	switch {
-	case GitQuiet(p.Base, "show-ref", "--verify", "--quiet", "refs/heads/"+branch):
+	case GitQuiet(p.Base, "--git-dir=.", "show-ref", "--verify", "--quiet", "refs/heads/"+branch):
 		ui.Info(fmt.Sprintf("Creating worktree for existing local branch '%s' at %s", branch, dir))
-		if err := Git(p.Base, "worktree", "add", dir, branch); err != nil {
+		if err := Git(p.Base, "--git-dir=.", "worktree", "add", dir, branch); err != nil {
 			return "", false, fmt.Errorf("worktree add failed")
 		}
 		setUpstream(p.Base, branch)
-	case GitQuiet(p.Base, "show-ref", "--verify", "--quiet", "refs/remotes/origin/"+branch):
+	case GitQuiet(p.Base, "--git-dir=.", "show-ref", "--verify", "--quiet", "refs/remotes/origin/"+branch):
 		ui.Info(fmt.Sprintf("Creating worktree tracking origin/%s at %s", branch, dir))
-		if err := Git(p.Base, "worktree", "add", "--track", "-b", branch, dir, "origin/"+branch); err != nil {
+		if err := Git(p.Base, "--git-dir=.", "worktree", "add", "--track", "-b", branch, dir, "origin/"+branch); err != nil {
 			return "", false, fmt.Errorf("worktree add failed")
 		}
 	default:
@@ -458,7 +460,7 @@ func (p *Project) EnsureWorktree(branch string, copyFiles []string, pickBase fun
 		ui.Info(fmt.Sprintf("Creating new branch '%s' off %s at %s", branch, baseRef, dir))
 		// --no-track so autoSetupMerge doesn't point upstream at the base ref; we
 		// then track the same-named branch so a plain push/pull targets origin/<branch>.
-		if err := Git(p.Base, "worktree", "add", "--no-track", "-b", branch, dir, baseRef); err != nil {
+		if err := Git(p.Base, "--git-dir=.", "worktree", "add", "--no-track", "-b", branch, dir, baseRef); err != nil {
 			return "", false, fmt.Errorf("worktree add failed")
 		}
 		setUpstream(p.Base, branch)
@@ -475,10 +477,10 @@ func (p *Project) EnsureWorktree(branch string, copyFiles []string, pickBase fun
 // is no remote counterpart. An unknown name is an error so a bad --from (or an
 // empty picker selection) fails loudly instead of silently basing off HEAD.
 func (p *Project) resolveBaseRef(branch string) (string, error) {
-	if GitQuiet(p.Base, "show-ref", "--verify", "--quiet", "refs/remotes/origin/"+branch) {
+	if GitQuiet(p.Base, "--git-dir=.", "show-ref", "--verify", "--quiet", "refs/remotes/origin/"+branch) {
 		return "origin/" + branch, nil
 	}
-	if GitQuiet(p.Base, "rev-parse", "--verify", "--quiet", branch+"^{commit}") {
+	if GitQuiet(p.Base, "--git-dir=.", "rev-parse", "--verify", "--quiet", branch+"^{commit}") {
 		return branch, nil
 	}
 	return "", fmt.Errorf("base branch %q not found locally or on origin", branch)
@@ -530,7 +532,7 @@ func (p *Project) OriginBranches() []string {
 // refNames lists refs under prefix with `git for-each-ref`, one per line, in
 // the given format, dropping blank lines.
 func refNames(base, format, prefix string) []string {
-	o, err := GitOut(base, "for-each-ref", format, prefix)
+	o, err := GitOut(base, "--git-dir=.", "for-each-ref", format, prefix)
 	if err != nil {
 		return nil
 	}
@@ -547,13 +549,13 @@ func refNames(base, format, prefix string) []string {
 // first; -D is needed because `git branch -d` only accepts branches merged into
 // HEAD or their upstream, which says nothing about origin/<default>.
 func (p *Project) DeleteBranch(branch string) error {
-	return gitCombined(p.Base, "branch", "-D", branch)
+	return gitCombined(p.Base, "--git-dir=.", "branch", "-D", branch)
 }
 
 // DeleteOriginBranch deletes branch from origin. A branch already gone from the
 // remote (deleted by someone else, or by the forge on merge) counts as success.
 func (p *Project) DeleteOriginBranch(branch string) error {
-	err := gitCombined(p.Base, "push", "--delete", "origin", branch)
+	err := gitCombined(p.Base, "--git-dir=.", "push", "--delete", "origin", branch)
 	if err != nil && strings.Contains(err.Error(), "remote ref does not exist") {
 		return nil
 	}
@@ -599,17 +601,17 @@ func Clone(url, folder string, copyFiles []string) (proj *Project, dir, branch s
 	if err := GitPlain("clone", "--bare", url, base); err != nil {
 		return nil, "", "", fmt.Errorf("clone failed")
 	}
-	_ = Git(base, "config", "remote.origin.fetch", "+refs/heads/*:refs/remotes/origin/*")
-	if err := Git(base, "fetch", "origin"); err != nil {
+	_ = Git(base, "--git-dir=.", "config", "remote.origin.fetch", "+refs/heads/*:refs/remotes/origin/*")
+	if err := Git(base, "--git-dir=.", "fetch", "origin"); err != nil {
 		ui.Warn("initial fetch failed.")
 	}
-	_ = GitQuiet(base, "remote", "set-head", "origin", "-a")
+	_ = GitQuiet(base, "--git-dir=.", "remote", "set-head", "origin", "-a")
 
 	p := &Project{Base: base, Dir: dest}
 	branch = p.DefaultBranch()
 	dir = filepath.Join(dest, Sanitize(branch))
 	ui.Info(fmt.Sprintf("Creating worktree for '%s' at %s", branch, dir))
-	if err := Git(base, "worktree", "add", dir, branch); err != nil {
+	if err := Git(base, "--git-dir=.", "worktree", "add", dir, branch); err != nil {
 		return nil, "", "", fmt.Errorf("worktree add failed")
 	}
 	setUpstream(base, branch)
@@ -755,18 +757,18 @@ func indexLocked(dir string) bool {
 //     submodule guard).
 func (p *Project) RemoveWorktree(path string, force bool) error {
 	if force {
-		return Git(p.Base, "worktree", "remove", "--force", "--force", path)
+		return Git(p.Base, "--git-dir=.", "worktree", "remove", "--force", "--force", path)
 	}
 	if !p.WorktreeClean(path) {
 		return ErrWorktreeDirty
 	}
-	return Git(p.Base, "worktree", "remove", "--force", path)
+	return Git(p.Base, "--git-dir=.", "worktree", "remove", "--force", path)
 }
 
 // Prune fetches (with --prune) so merge detection sees the latest
 // origin/<default> and remote-tracking refs before classifying worktrees.
 func (p *Project) Prune() {
-	if !GitQuiet(p.Base, "fetch", "--prune", "origin") {
+	if !GitQuiet(p.Base, "--git-dir=.", "fetch", "--prune", "origin") {
 		ui.Warn("fetch failed; using local state.")
 	}
 }
@@ -781,7 +783,7 @@ func (p *Project) Prune() {
 // upstream: a leading "-" means an equivalent patch exists in into. The
 // synthesized commit is dangling (no ref points at it) and is reclaimed by gc.
 func (p *Project) BranchSquashMerged(branch, into string) bool {
-	base, err := GitOut(p.Base, "merge-base", into, branch)
+	base, err := GitOut(p.Base, "--git-dir=.", "merge-base", into, branch)
 	if err != nil {
 		return false
 	}
@@ -789,7 +791,7 @@ func (p *Project) BranchSquashMerged(branch, into string) bool {
 	if base == "" {
 		return false
 	}
-	tree, err := GitOut(p.Base, "rev-parse", branch+"^{tree}")
+	tree, err := GitOut(p.Base, "--git-dir=.", "rev-parse", branch+"^{tree}")
 	if err != nil {
 		return false
 	}
@@ -797,7 +799,7 @@ func (p *Project) BranchSquashMerged(branch, into string) bool {
 	if tree == "" {
 		return false
 	}
-	virt, err := GitOut(p.Base, "commit-tree", tree, "-p", base, "-m", "_")
+	virt, err := GitOut(p.Base, "--git-dir=.", "commit-tree", tree, "-p", base, "-m", "_")
 	if err != nil {
 		return false
 	}
@@ -805,7 +807,7 @@ func (p *Project) BranchSquashMerged(branch, into string) bool {
 	if virt == "" {
 		return false
 	}
-	out, err := GitOut(p.Base, "cherry", into, virt)
+	out, err := GitOut(p.Base, "--git-dir=.", "cherry", into, virt)
 	if err != nil {
 		return false
 	}
@@ -816,7 +818,7 @@ func (p *Project) BranchSquashMerged(branch, into string) bool {
 // It is the detached-HEAD counterpart of `git branch --merged`, which lists only
 // branches.
 func (p *Project) CommitMerged(rev, into string) bool {
-	return GitQuiet(p.Base, "merge-base", "--is-ancestor", rev, into)
+	return GitQuiet(p.Base, "--git-dir=.", "merge-base", "--is-ancestor", rev, into)
 }
 
 // prSuffix matches the " (#123)" that forges append to a squash commit's subject.
@@ -834,13 +836,13 @@ var prSuffix = regexp.MustCompile(`\s+\(#\d+\)$`)
 // a HEAD that some ref still holds is not evidence of anything upstream.
 func (p *Project) SubjectsUpstream(head, into string) bool {
 	// Subjects of the commits only head holds
-	own, err := GitOut(p.Base, "log", "--no-merges", "--format=%s", head, "--not", "--branches", "--remotes", "--tags")
+	own, err := GitOut(p.Base, "--git-dir=.", "log", "--no-merges", "--format=%s", head, "--not", "--branches", "--remotes", "--tags")
 	if err != nil || strings.TrimSpace(own) == "" {
 		return false
 	}
 
 	// Subjects that landed upstream since head forked, without their PR numbers
-	theirs, err := GitOut(p.Base, "log", "--no-merges", "--format=%s", into, "--not", head)
+	theirs, err := GitOut(p.Base, "--git-dir=.", "log", "--no-merges", "--format=%s", into, "--not", head)
 	if err != nil {
 		return false
 	}
@@ -862,7 +864,7 @@ func (p *Project) SubjectsUpstream(head, into string) bool {
 // OriginRepoSlug returns the "host/owner/repo" slug for the origin remote,
 // suitable for `gh --repo`, or "" when it cannot be determined.
 func (p *Project) OriginRepoSlug() string {
-	out, err := GitOut(p.Base, "remote", "get-url", "origin")
+	out, err := GitOut(p.Base, "--git-dir=.", "remote", "get-url", "origin")
 	if err != nil {
 		return ""
 	}

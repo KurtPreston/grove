@@ -790,7 +790,7 @@ func removeWorktrees(p *project.Project, remove []pruneCandidate) {
 			ui.Info(fmt.Sprintf("Removed worktree %s.", c.path))
 		}
 	}
-	_ = project.Git(p.Base, "worktree", "prune")
+	_ = project.Git(p.Base, "--git-dir=.", "worktree", "prune")
 }
 
 // deleteLocalBranches deletes each branch ref, one at a time so a single
@@ -1078,7 +1078,7 @@ func mergedOriginBranches(p *project.Project, into string) map[string]bool {
 // mergedRefs runs a `git branch --merged` listing and returns its names as a set,
 // or nil if git fails.
 func mergedRefs(p *project.Project, args ...string) map[string]bool {
-	out, err := project.GitOut(p.Base, args...)
+	out, err := project.GitOut(p.Base, append([]string{"--git-dir=."}, args...)...)
 	if err != nil {
 		return nil
 	}
