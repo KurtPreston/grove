@@ -55,11 +55,32 @@ func gitContext() (context.Context, context.CancelFunc) {
 	return context.Background(), func() {}
 }
 
+// gitArgs builds `-C dir args...`. When dir is a bare repo it also passes
+// `--git-dir=.`, because environments that set safe.bareRepository=explicit
+// (common in sandboxed agent shells) refuse to discover a bare repo from -C.
+func gitArgs(dir string, args ...string) []string {
+	full := []string{"-C", dir}
+	if isBareRepo(dir) {
+		full = append(full, "--git-dir=.")
+	}
+	return append(full, args...)
+}
+
+// isBareRepo reports whether dir is itself a git dir (HEAD and objects at its
+// top level) rather than a worktree or an ordinary directory.
+func isBareRepo(dir string) bool {
+	if _, err := os.Stat(filepath.Join(dir, "HEAD")); err != nil {
+		return false
+	}
+	fi, err := os.Stat(filepath.Join(dir, "objects"))
+	return err == nil && fi.IsDir()
+}
+
 // Git runs `git -C dir args...`, streaming chatter to stderr.
 func Git(dir string, args ...string) error {
 	ctx, cancel := gitContext()
 	defer cancel()
-	cmd := exec.CommandContext(ctx, "git", append([]string{"-C", dir}, args...)...)
+	cmd := exec.CommandContext(ctx, "git", gitArgs(dir, args...)...)
 	cmd.Env = gitBaseEnv()
 	cmd.Stdout = os.Stderr
 	cmd.Stderr = os.Stderr
@@ -70,7 +91,7 @@ func Git(dir string, args ...string) error {
 func GitQuiet(dir string, args ...string) bool {
 	ctx, cancel := gitContext()
 	defer cancel()
-	cmd := exec.CommandContext(ctx, "git", append([]string{"-C", dir}, args...)...)
+	cmd := exec.CommandContext(ctx, "git", gitArgs(dir, args...)...)
 	cmd.Env = gitBaseEnv()
 	return cmd.Run() == nil
 }
@@ -79,7 +100,7 @@ func GitQuiet(dir string, args ...string) bool {
 func GitOut(dir string, args ...string) (string, error) {
 	ctx, cancel := gitContext()
 	defer cancel()
-	cmd := exec.CommandContext(ctx, "git", append([]string{"-C", dir}, args...)...)
+	cmd := exec.CommandContext(ctx, "git", gitArgs(dir, args...)...)
 	cmd.Env = gitBaseEnv()
 	var out strings.Builder
 	cmd.Stdout = &out
@@ -565,7 +586,7 @@ func (p *Project) DeleteOriginBranch(branch string) error {
 func gitCombined(dir string, args ...string) error {
 	ctx, cancel := gitContext()
 	defer cancel()
-	cmd := exec.CommandContext(ctx, "git", append([]string{"-C", dir}, args...)...)
+	cmd := exec.CommandContext(ctx, "git", gitArgs(dir, args...)...)
 	cmd.Env = gitBaseEnv()
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("%w: %s", err, strings.TrimSpace(string(out)))
@@ -691,7 +712,7 @@ func WorktreeDirtiness(ctx context.Context, dir string) Dirtiness {
 
 	// Start status with output captured; GROVE_GIT_TIMEOUT still applies
 	gitCtx, cancel := gitContext()
-	cmd := exec.CommandContext(gitCtx, "git", "-C", dir, "status", "--porcelain")
+	cmd := exec.CommandContext(gitCtx, "git", gitArgs(dir, "status", "--porcelain")...)
 	cmd.Env = gitBaseEnv()
 	var out strings.Builder
 	cmd.Stdout = &out

@@ -458,6 +458,27 @@ func TestResolveBaseRefUnknownBranchErrors(t *testing.T) {
 	}
 }
 
+// TestEnsureWorktreeWithExplicitBareRepository verifies grove still works when
+// git refuses implicit bare-repo discovery (safe.bareRepository=explicit), as in
+// sandboxed agent shells; previously every `git -C .base` call failed there and
+// a new branch reported its base branch as missing.
+func TestEnsureWorktreeWithExplicitBareRepository(t *testing.T) {
+	p := newTestProject(t)
+
+	// Apply the restriction the same way such shells do: via env-supplied config
+	t.Setenv("GIT_CONFIG_COUNT", "1")
+	t.Setenv("GIT_CONFIG_KEY_0", "safe.bareRepository")
+	t.Setenv("GIT_CONFIG_VALUE_0", "explicit")
+
+	// A new branch must resolve main and land on main's tip
+	if _, _, err := p.EnsureWorktree("feature", nil, nil, nil); err != nil {
+		t.Fatalf("EnsureWorktree(feature): %v", err)
+	}
+	if got, want := revParse(t, p.Base, "feature"), revParse(t, p.Base, "main"); got != want {
+		t.Errorf("feature tip = %s, want main tip %s", got, want)
+	}
+}
+
 // TestCloneSetsUpstreamOnDefaultBranch verifies the default-branch worktree
 // created by clone is pushable: a bare clone leaves no branch tracking config, so
 // grove wires it up itself.
