@@ -102,9 +102,34 @@ func TestPruneReason(t *testing.T) {
 	// protected: cut from main with no new commits, so it is an ancestor of main
 	gitDo(t, base, "branch", "release-1", "main~1")
 
+	// Behind its pull request: the request gained a commit the branch never
+	// fetched, then landed as one squash, so only the request's diff matches.
+	gitDo(t, base, "checkout", "-q", "-b", "feat-stale", "main")
+	gitCommit(t, base, "stale.txt", "s1", "st1")
+	gitDo(t, base, "checkout", "-q", "-b", "pr-9")
+	gitCommit(t, base, "stale.txt", "s2", "st2 review fix")
+	gitDo(t, base, "update-ref", "refs/grove/pull/9", "pr-9")
+	gitDo(t, base, "checkout", "-q", "main")
+	gitDo(t, base, "merge", "--squash", "pr-9")
+	gitDo(t, base, "commit", "-q", "-m", "stale (#9)")
+	gitDo(t, base, "branch", "-q", "-D", "pr-9")
+	staleHead := gitRev(t, base, "feat-stale")
+
+	// Inside a pull request that never landed: kept
+	gitDo(t, base, "checkout", "-q", "-b", "feat-inopen", "main")
+	gitCommit(t, base, "inopen.txt", "i1", "i1")
+	gitDo(t, base, "checkout", "-q", "-b", "pr-10")
+	gitCommit(t, base, "inopen.txt", "i2", "i2")
+	gitDo(t, base, "update-ref", "refs/grove/pull/10", "pr-10")
+	gitDo(t, base, "checkout", "-q", "main")
+	gitDo(t, base, "branch", "-q", "-D", "pr-10")
+	gitDo(t, base, "update-ref", "refs/remotes/origin/main", "main")
+
 	const def = "main"
 	const otherCwd = "/some/other/cwd"
 	std := config.Config{} // squash detection on, forge off
+	pullOff := false
+	noPulls := config.Config{Prune: &config.PruneConfig{PullRefs: &pullOff}}
 	wt := func(b string) project.Worktree { return project.Worktree{Path: "/wt/" + b, Branch: b} }
 	detached := func(head string) project.Worktree {
 		return project.Worktree{Path: "/wt/detached", Head: head, Detached: true}
@@ -142,6 +167,12 @@ func TestPruneReason(t *testing.T) {
 		{"detached unmerged kept", detached(lostHead), otherCwd, std, nil, false, ""},
 		{"detached on open branch kept", detached(gitRev(t, base, "feat-open")), otherCwd, std, nil, false, ""},
 		{"detached current dir kept", project.Worktree{Path: otherCwd, Head: prHead, Detached: true}, otherCwd, std, nil, false, ""},
+		{"behind landed pull request", wt("feat-stale"), otherCwd, std, nil, false, "pr #9"},
+		{"pull request check disabled", wt("feat-stale"), otherCwd, noPulls, nil, false, ""},
+		{"pull request check needs squash detection", wt("feat-stale"), otherCwd, squashOff(), nil, false, ""},
+		{"pull request check skipped on partial clone", wt("feat-stale"), otherCwd, std, nil, true, ""},
+		{"inside unlanded pull request kept", wt("feat-inopen"), otherCwd, std, nil, false, ""},
+		{"detached inside landed pull request", detached(staleHead), otherCwd, std, nil, false, "pr #9"},
 	}
 	merged := mergedBranches(p, "origin/"+def)
 	for _, tc := range tests {
@@ -149,6 +180,10 @@ func TestPruneReason(t *testing.T) {
 			in := pruneInputs{
 				p: p, def: def, cwd: tc.cwd, cfg: tc.cfg, partial: tc.partial,
 				merged: merged, forgeMerged: tc.forgeMerged,
+			}
+			// Mirror cmdPrune: the pull request check needs squash detection and a full clone
+			if tc.cfg.PullRefsEnabled() && !tc.partial {
+				in.pulls = newPullHeads(p, "origin/"+def)
 			}
 			got := in.reason(tc.w)
 			if got != tc.want {

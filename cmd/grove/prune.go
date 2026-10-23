@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"sync"
 
 	"grove/internal/color"
 	"grove/internal/config"
@@ -50,6 +51,16 @@ func cmdPrune(args []string) {
 		ui.Warn("Partial (blobless) clone detected; skipping squash/rebase-merge detection (ancestry-only) to avoid on-demand fetches.")
 	}
 
+	// Mirror pull request heads so branches older than their squash-merged
+	// request still count; a failed fetch falls back to the last mirror
+	var pulls *pullHeads
+	if cfg.PullRefsEnabled() && !partial {
+		if !p.FetchPullHeads() {
+			ui.Warn("Fetching pull request heads failed; using local state.")
+		}
+		pulls = newPullHeads(p, "origin/"+def)
+	}
+
 	wts, _ := p.Worktrees()
 	cwd := mustGetwd()
 	var forgeMerged map[string]string
@@ -60,6 +71,7 @@ func cmdPrune(args []string) {
 		p: p, def: def, cwd: cwd, cfg: cfg, partial: partial,
 		merged:      mergedBranches(p, "origin/"+def),
 		forgeMerged: forgeMerged,
+		pulls:       pulls,
 	}
 
 	// Classify every worktree in parallel; each check may run git (squash
@@ -319,11 +331,12 @@ type pruneInputs struct {
 	cfg         config.Config
 	merged      map[string]bool   // branches whose tips are ancestors of origin/<def>
 	forgeMerged map[string]string // head branch -> head commit of its merged PR, per the forge
+	pulls       *pullHeads        // fetched pull request heads; nil when that check is off
 	partial     bool
 }
 
 // reason returns why a worktree is a prune candidate ("merged", "squashed",
-// "forge", or "subject"), or "" when it should be kept. A worktree is never a
+// "forge", "pr #N", or "subject"), or "" when it should be kept. A worktree is never a
 // candidate when it is bare, is on the default or a protected branch, or is the
 // current directory. Detached worktrees are judged by their HEAD commit (see
 // detachedReason).
@@ -339,7 +352,7 @@ func (in pruneInputs) reason(w project.Worktree) string {
 
 // refReason classifies one branch, named name and resolved through ref (the
 // branch itself, or origin/<name> for a remote one), as "merged", "squashed",
-// or "forge"; or "" to keep it. ancestor reports whether ref's tip is already an
+// "forge", or "pr #N"; or "" to keep it. ancestor reports whether ref's tip is already an
 // ancestor of origin/<def>, as listed once up front by `git branch --merged`.
 func (in pruneInputs) refReason(name, ref string, ancestor bool) string {
 	p, cfg := in.p, in.cfg
@@ -361,6 +374,12 @@ func (in pruneInputs) refReason(name, ref string, ancestor bool) string {
 	// (or a reused branch name) never count as landed.
 	if head, ok := in.forgeMerged[name]; ok && head != "" && p.CommitMerged(ref, head) {
 		return "forge"
+	}
+	// A pull request can gain commits after a branch's last fetch, or be
+	// superseded by a later one, so its squash no longer matches the branch's
+	// own diff. Any landed request holding all of the branch's commits counts.
+	if r := in.pulls.reason(ref); r != "" {
+		return r
 	}
 	// Otherwise keep it. A "gone" upstream (branch.<name>.remote set with no
 	// origin/<name> ref) is deliberately NOT a prune signal. grove points every
@@ -457,7 +476,53 @@ func (in pruneInputs) detachedReason(w project.Worktree, into string) string {
 	if p.SubjectsUpstream(w.Head, into) {
 		return "subject"
 	}
+	return in.pulls.reason(w.Head)
+}
+
+// pullHeads judges a branch against the fetched pull request heads that contain
+// it. Each head is judged once and the verdict shared, since branches are
+// classified in parallel and several may sit inside the same request.
+type pullHeads struct {
+	p      *project.Project
+	into   string
+	mu     sync.Mutex
+	landed map[string]bool
+}
+
+func newPullHeads(p *project.Project, into string) *pullHeads {
+	return &pullHeads{p: p, into: into, landed: map[string]bool{}}
+}
+
+// reason returns "pr #N" (or "pr !N" for a GitLab merge request) when a pull
+// request containing rev landed in into by merge or squash, or "" otherwise.
+// A nil receiver means the check is off.
+func (h *pullHeads) reason(rev string) string {
+	if h == nil {
+		return ""
+	}
+	for _, ref := range h.p.PullHeadsContaining(rev) {
+		if h.headLanded(ref) {
+			return "pr " + project.PullLabel(ref)
+		}
+	}
 	return ""
+}
+
+// headLanded reports, caching the verdict, whether the pull request head ref is
+// in into by ancestry or patch-equivalence. A head both workers judge at once is
+// just judged twice, with the same result.
+func (h *pullHeads) headLanded(ref string) bool {
+	h.mu.Lock()
+	landed, seen := h.landed[ref]
+	h.mu.Unlock()
+	if seen {
+		return landed
+	}
+	landed = h.p.CommitMerged(ref, h.into) || h.p.BranchSquashMerged(ref, h.into)
+	h.mu.Lock()
+	h.landed[ref] = landed
+	h.mu.Unlock()
+	return landed
 }
 
 // forgeMergedBranches maps each merged PR's head-branch name to its head commit,

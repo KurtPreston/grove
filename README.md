@@ -561,6 +561,9 @@ candidate when its branch is:
 - **squashed** — its net diff already exists in `origin/<default>`, detected via
   patch-equivalence so squash- and rebase-merged branches are caught even though
   their tips are not ancestors (on by default);
+- **pr #N** — every commit on it is part of a pull request that was merged or
+  squash-merged, even if the request gained more commits after the branch was
+  last fetched or was superseded by a later request (on by default; see below);
 - **forge** — matched to a merged pull request reported by the forge (opt-in).
 
 A detached worktree (`(no branch)` in `grove list`) is judged by its HEAD
@@ -579,7 +582,7 @@ never pushed is indistinguishable from one whose upstream was deleted — `git
 branch -vv` reports `[origin/<branch>: gone]` for both, and no local ref, reflog,
 or track field tells them apart. Pruning on that signal would discard
 never-pushed work, so grove removes a worktree only when its work is provably
-upstream (merged/squashed/forge).
+upstream (merged/squashed/pr/forge).
 
 Branches are judged the same way. Prune deletes the branch of every worktree it
 removes, plus any other merged local branch that no remaining worktree has
@@ -601,6 +604,7 @@ branches:
 ```jsonc
 "prune": {
   "detectSquash": true,           // default; set false to disable patch-equivalence detection
+  "pullRefs": true,               // default; set false to skip fetching pull request heads
   "forge": {
     "enabled": false,             // default; when true, consult the forge via the gh CLI
     "repo": "github.com/owner/repo" // optional; overrides the slug derived from origin
@@ -608,6 +612,18 @@ branches:
   "protect": ["main", "master", "develop", "staging", "release*"] // default; branch globs prune never touches
 }
 ```
+
+The pull request check needs no forge API. Prune fetches the head ref forges
+publish for every pull request (`refs/pull/N/head` on GitHub and Gitea,
+`refs/merge-requests/N/head` on GitLab) into `refs/grove/`. Requests the forge
+no longer publishes are pruned. A branch, or a detached worktree's HEAD, counts
+as merged when one of those heads contains it and is itself merged or
+squash-merged into `origin/<default>`. This catches a branch whose squashed diff
+no longer matches because review fixes were pushed from elsewhere. A remote that
+publishes no such refs fetches nothing. The check runs only with squash
+detection on and is skipped on partial clones. The first fetch downloads every
+pull request's commits, which can be large on a repository with thousands of
+them; set `"pullRefs": false` to skip it.
 
 The forge check runs one `gh pr list --state merged` query and treats any branch
 matching a merged PR's head as a candidate, as long as the branch hasn't moved
