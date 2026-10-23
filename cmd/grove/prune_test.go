@@ -123,6 +123,19 @@ func TestPruneReason(t *testing.T) {
 	gitDo(t, base, "update-ref", "refs/grove/pull/10", "pr-10")
 	gitDo(t, base, "checkout", "-q", "main")
 	gitDo(t, base, "branch", "-q", "-D", "pr-10")
+
+	// Inside an open request that cancels the branch's change: the branch adds
+	// a file, the request swaps it for one main gained independently, so the
+	// request's net diff matches main although the branch's work never landed.
+	gitDo(t, base, "checkout", "-q", "-b", "feat-cancel", "main")
+	gitCommit(t, base, "cancel-a.txt", "a", "add A")
+	gitDo(t, base, "checkout", "-q", "-b", "pr-11")
+	gitDo(t, base, "rm", "-q", "cancel-a.txt")
+	gitCommit(t, base, "cancel-b.txt", "b", "swap A for B")
+	gitDo(t, base, "update-ref", "refs/grove/pull/11", "pr-11")
+	gitDo(t, base, "checkout", "-q", "main")
+	gitCommit(t, base, "cancel-b.txt", "b", "add B independently")
+	gitDo(t, base, "branch", "-q", "-D", "pr-11")
 	gitDo(t, base, "update-ref", "refs/remotes/origin/main", "main")
 
 	const def = "main"
@@ -172,6 +185,7 @@ func TestPruneReason(t *testing.T) {
 		{"pull request check needs squash detection", wt("feat-stale"), otherCwd, squashOff(), nil, false, ""},
 		{"pull request check skipped on partial clone", wt("feat-stale"), otherCwd, std, nil, true, ""},
 		{"inside unlanded pull request kept", wt("feat-inopen"), otherCwd, std, nil, false, ""},
+		{"inside open pull request matching main by chance kept", wt("feat-cancel"), otherCwd, std, nil, false, ""},
 		{"detached inside landed pull request", detached(staleHead), otherCwd, std, nil, false, "pr #9"},
 	}
 	merged := mergedBranches(p, "origin/"+def)

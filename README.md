@@ -617,10 +617,14 @@ The pull request check needs no forge API. Prune fetches the head ref forges
 publish for every pull request (`refs/pull/N/head` on GitHub and Gitea,
 `refs/merge-requests/N/head` on GitLab) into `refs/grove/`. Requests the forge
 no longer publishes are pruned. A branch, or a detached worktree's HEAD, counts
-as merged when one of those heads contains it and is itself merged or
-squash-merged into `origin/<default>`. This catches a branch whose squashed diff
-no longer matches because review fixes were pushed from elsewhere. A remote that
-publishes no such refs fetches nothing. The check runs only with squash
+as merged when one of those heads contains it and the request landed in
+`origin/<default>`: either its head is an ancestor, or a commit naming the
+request (as forges title squash merges, such as `(#50)`) carries exactly the
+request's net diff. A matching diff alone isn't enough, since an open request
+can match an unrelated upstream change by chance. This catches a branch whose
+squashed diff no longer matches because review fixes were pushed from
+elsewhere. A squash whose message doesn't name its request isn't recognized. A
+remote that publishes no such refs fetches nothing. The check runs only with squash
 detection on and is skipped on partial clones. The first fetch downloads every
 pull request's commits, which can be large on a repository with thousands of
 them; set `"pullRefs": false` to skip it.

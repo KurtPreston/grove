@@ -1,6 +1,8 @@
 package project
 
 import (
+	"os/exec"
+	"regexp"
 	"strings"
 )
 
@@ -53,4 +55,64 @@ func PullLabel(ref string) string {
 		}
 	}
 	return ref
+}
+
+// PullLanded reports whether the pull request whose fetched head is ref landed
+// in into. Either its head is an ancestor of into (a merge commit), or a commit
+// in into names the request (as forges title squash merges, e.g. "(#50)") and
+// carries exactly the request's net diff. Matching the diff alone is not
+// enough: an open request whose changes happen to equal an unrelated upstream
+// commit would otherwise vouch for every branch inside it.
+func (p *Project) PullLanded(ref, into string) bool {
+	if p.CommitMerged(ref, into) {
+		return true
+	}
+	label := PullLabel(ref)
+	if label == ref {
+		return false
+	}
+
+	// The request's net diff since it forked from into
+	base, err := GitOut(p.Base, "--git-dir=.", "merge-base", into, ref)
+	if err != nil || strings.TrimSpace(base) == "" {
+		return false
+	}
+	want := p.patchID(strings.TrimSpace(base), ref)
+	if want == "" {
+		return false
+	}
+
+	// Commits that landed since then naming the request, not a longer number
+	pattern := regexp.QuoteMeta(label) + "([^0-9]|$)"
+	out, err := GitOut(p.Base, "--git-dir=.", "log", "-E", "--format=%H", "--grep="+pattern, into, "--not", ref, "--")
+	if err != nil {
+		return false
+	}
+	for _, c := range strings.Fields(out) {
+		if p.patchID(c+"^", c) == want {
+			return true
+		}
+	}
+	return false
+}
+
+// patchID returns the stable patch ID of the diff from one commit to another,
+// or "" when the diff is empty or git fails.
+func (p *Project) patchID(from, to string) string {
+	diff, err := GitOut(p.Base, "--git-dir=.", "diff-tree", "-p", "--no-color", "--no-ext-diff", from, to, "--")
+	if err != nil || strings.TrimSpace(diff) == "" {
+		return ""
+	}
+
+	// git patch-id reads the diff on stdin and prints "<id> <commit>"
+	ctx, cancel := gitContext()
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "git", "-C", p.Base, "--git-dir=.", "patch-id", "--stable")
+	cmd.Env = gitBaseEnv()
+	cmd.Stdin = strings.NewReader(diff)
+	out, err := cmd.Output()
+	if fields := strings.Fields(string(out)); err == nil && len(fields) > 0 {
+		return fields[0]
+	}
+	return ""
 }

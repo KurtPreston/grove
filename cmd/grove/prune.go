@@ -508,8 +508,8 @@ func (h *pullHeads) reason(rev string) string {
 	return ""
 }
 
-// headLanded reports, caching the verdict, whether the pull request head ref is
-// in into by ancestry or patch-equivalence. A head both workers judge at once is
+// headLanded reports, caching the verdict, whether the pull request head ref
+// landed in into (see project.PullLanded). A head both workers judge at once is
 // just judged twice, with the same result.
 func (h *pullHeads) headLanded(ref string) bool {
 	h.mu.Lock()
@@ -518,7 +518,7 @@ func (h *pullHeads) headLanded(ref string) bool {
 	if seen {
 		return landed
 	}
-	landed = h.p.CommitMerged(ref, h.into) || h.p.BranchSquashMerged(ref, h.into)
+	landed = h.p.PullLanded(ref, h.into)
 	h.mu.Lock()
 	h.landed[ref] = landed
 	h.mu.Unlock()

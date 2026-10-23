@@ -78,3 +78,33 @@ func TestPullLabel(t *testing.T) {
 		}
 	}
 }
+
+// TestPullLanded checks that a request counts as landed only when a commit
+// naming it carries its net diff, not merely when the diff matches.
+func TestPullLanded(t *testing.T) {
+	p := newMergeRepo(t)
+	commitFile(t, p.Dir, "base.txt", "0", "c0")
+
+	// Request #9 gains a review fix, then lands as a squash naming it
+	runGit(t, p.Dir, "checkout", "-q", "-b", "pr-9")
+	commitFile(t, p.Dir, "stale.txt", "s1", "st1")
+	commitFile(t, p.Dir, "stale.txt", "s2", "review fix")
+	runGit(t, p.Dir, "update-ref", "refs/grove/pull/9", "pr-9")
+	runGit(t, p.Dir, "checkout", "-q", "main")
+	runGit(t, p.Dir, "merge", "-q", "--squash", "pr-9")
+	runGit(t, p.Dir, "commit", "-q", "-m", "stale (#9)")
+
+	// Request #11 matches an unrelated commit's diff but was never merged
+	runGit(t, p.Dir, "checkout", "-q", "-b", "pr-11")
+	commitFile(t, p.Dir, "b.txt", "b", "add B")
+	runGit(t, p.Dir, "update-ref", "refs/grove/pull/11", "pr-11")
+	runGit(t, p.Dir, "checkout", "-q", "main")
+	commitFile(t, p.Dir, "b.txt", "b", "add B independently")
+
+	if !p.PullLanded("refs/grove/pull/9", "main") {
+		t.Error("squash-merged #9 not landed")
+	}
+	if p.PullLanded("refs/grove/pull/11", "main") {
+		t.Error("unmerged #11 counted as landed")
+	}
+}
