@@ -126,6 +126,11 @@ type PruneConfig struct {
 	// (branches whose tip is not an ancestor of origin/default). Defaults to true
 	// when nil.
 	DetectSquash *bool `json:"detectSquash,omitempty"`
+	// PullRefs extends squash detection to branches whose pull request gained
+	// more commits before it was squash-merged, by fetching the head refs forges
+	// publish for each pull request. Defaults to true when nil; it only runs
+	// while squash detection does.
+	PullRefs *bool `json:"pullRefs,omitempty"`
 	// Forge optionally consults a forge (via the gh CLI) for authoritative
 	// merged-PR state.
 	Forge *ForgeConfig `json:"forge,omitempty"`
@@ -156,6 +161,19 @@ func (c Config) SquashDetectionEnabled() bool {
 		return true
 	}
 	return *c.Prune.DetectSquash
+}
+
+// PullRefsEnabled reports whether `grove prune` should fetch pull request head
+// refs and judge branches against them (the default). Squash detection must
+// also be on, since the check judges those heads by patch-equivalence.
+func (c Config) PullRefsEnabled() bool {
+	if !c.SquashDetectionEnabled() {
+		return false
+	}
+	if c.Prune == nil || c.Prune.PullRefs == nil {
+		return true
+	}
+	return *c.Prune.PullRefs
 }
 
 // ForgeEnabled reports whether `grove prune` should consult the forge for

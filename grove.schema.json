@@ -57,6 +57,10 @@
           "type": "boolean",
           "description": "Detect squash/rebase-merged branches via patch-equivalence against origin/<default> (default: true)."
         },
+        "pullRefs": {
+          "type": "boolean",
+          "description": "Fetch the head refs forges publish for each pull request (refs/pull/N/head, refs/merge-requests/N/head) into refs/grove/, and treat a branch as merged when a pull request containing its tip landed, by merge or by a squash commit naming it, even if the pull request gained more commits later (default: true). Requires detectSquash."
+        },
         "forge": {
           "type": "object",
           "additionalProperties": false,
