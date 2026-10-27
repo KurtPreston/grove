@@ -596,8 +596,11 @@ func Clone(url, folder string, copyFiles []string) (proj *Project, dir, branch s
 	if err := os.MkdirAll(dest, 0o755); err != nil {
 		return nil, "", "", err
 	}
+	// A plain bare clone copies every origin branch into refs/heads; with
+	// --single-branch only the default branch becomes local, and the fetch
+	// below fills in the rest as origin/* refs.
 	base := filepath.Join(dest, ".base")
-	if err := GitPlain("clone", "--bare", url, base); err != nil {
+	if err := GitPlain("clone", "--bare", "--single-branch", url, base); err != nil {
 		return nil, "", "", fmt.Errorf("clone failed")
 	}
 	_ = Git(base, "--git-dir=.", "config", "remote.origin.fetch", "+refs/heads/*:refs/remotes/origin/*")
