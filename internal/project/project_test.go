@@ -551,6 +551,47 @@ func TestCloneSetsUpstreamOnDefaultBranch(t *testing.T) {
 	assertTracksOrigin(t, p.Base, branch)
 }
 
+// TestCloneKeepsOnlyDefaultBranchLocal verifies clone doesn't copy every origin
+// branch into refs/heads, as a plain bare clone does; the others exist only as
+// origin/* refs.
+func TestCloneKeepsOnlyDefaultBranchLocal(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+	// Origin has a default branch plus two feature branches
+	root := t.TempDir()
+	src := filepath.Join(root, "src")
+	if err := os.MkdirAll(src, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, src, "init", "-q", "-b", "trunk")
+	runGit(t, src, "commit", "-q", "--allow-empty", "-m", "init")
+	runGit(t, src, "branch", "feat1")
+	runGit(t, src, "branch", "feat2")
+
+	p, _, branch, err := Clone(src, filepath.Join(root, "proj"), nil)
+	if err != nil {
+		t.Fatalf("Clone: %v", err)
+	}
+	if branch != "trunk" {
+		t.Fatalf("default branch = %q, want trunk", branch)
+	}
+
+	// Only the default branch is local; the features are remote-tracking
+	if got := p.LocalBranches(); len(got) != 1 || got[0] != "trunk" {
+		t.Errorf("local branches = %v, want [trunk]", got)
+	}
+	origin := map[string]bool{}
+	for _, b := range p.OriginBranches() {
+		origin[b] = true
+	}
+	for _, b := range []string{"trunk", "feat1", "feat2"} {
+		if !origin[b] {
+			t.Errorf("origin/%s missing; origin branches = %v", b, p.OriginBranches())
+		}
+	}
+}
+
 // TestBranchListSkipsOriginHEAD checks that the origin/HEAD alias doesn't
 // surface as a branch named "origin", and that slashed remote branches keep
 // their full name.
