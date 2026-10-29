@@ -104,8 +104,9 @@ func main() {
 			// recipes for it, equivalent to `cd PATH && grove here`.
 			cmdLaunch([]string{dir})
 		} else {
-			// Bare `grove BRANCH`: treat the token as a branch (uses grove.json recipes).
-			cmdSwitch([]string{cmd})
+			// Bare `grove BRANCH`: treat the token as a branch (uses grove.json
+			// recipes). Pass every argument so flags such as --from reach it.
+			cmdSwitch(args)
 		}
 	}
 }
