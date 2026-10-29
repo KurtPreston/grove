@@ -38,7 +38,7 @@ func TestEnsureWorktreeSetsUpstream(t *testing.T) {
 	p := newTestProject(t)
 
 	// Path: brand-new branch off the default.
-	if _, _, err := p.EnsureWorktree("feature/new", nil, baseDefault, nil); err != nil {
+	if _, _, err := p.EnsureWorktree(EnsureWorktreeOptions{Branch: "feature/new", PickBase: baseDefault}); err != nil {
 		t.Fatalf("EnsureWorktree(feature/new): %v", err)
 	}
 	assertTracksOrigin(t, p.Base, "feature/new")
@@ -46,7 +46,7 @@ func TestEnsureWorktreeSetsUpstream(t *testing.T) {
 	// Path: a local branch that already exists in the bare repo with no tracking
 	// config (e.g. carried over from a full clone).
 	runBaseGit(t, p.Base, "branch", "local/only", "main")
-	if _, _, err := p.EnsureWorktree("local/only", nil, baseDefault, nil); err != nil {
+	if _, _, err := p.EnsureWorktree(EnsureWorktreeOptions{Branch: "local/only", PickBase: baseDefault}); err != nil {
 		t.Fatalf("EnsureWorktree(local/only): %v", err)
 	}
 	assertTracksOrigin(t, p.Base, "local/only")
@@ -64,7 +64,7 @@ func TestEnsureWorktreeKeepsExistingUpstream(t *testing.T) {
 	runBaseGit(t, p.Base, "config", "branch.tracked.remote", "upstream")
 	runBaseGit(t, p.Base, "config", "branch.tracked.merge", "refs/heads/somewhere")
 
-	if _, _, err := p.EnsureWorktree("tracked", nil, baseDefault, nil); err != nil {
+	if _, _, err := p.EnsureWorktree(EnsureWorktreeOptions{Branch: "tracked", PickBase: baseDefault}); err != nil {
 		t.Fatalf("EnsureWorktree(tracked): %v", err)
 	}
 	if got := gitConfig(t, p.Base, "branch.tracked.remote"); got != "upstream" {
@@ -87,7 +87,7 @@ func TestEnsureWorktreeFixesBaseBranchUpstream(t *testing.T) {
 	runBaseGit(t, p.Base, "config", "branch.feature/forked.remote", "origin")
 	runBaseGit(t, p.Base, "config", "branch.feature/forked.merge", "refs/heads/main")
 
-	if _, _, err := p.EnsureWorktree("feature/forked", nil, baseDefault, nil); err != nil {
+	if _, _, err := p.EnsureWorktree(EnsureWorktreeOptions{Branch: "feature/forked", PickBase: baseDefault}); err != nil {
 		t.Fatalf("EnsureWorktree(feature/forked): %v", err)
 	}
 	assertTracksOrigin(t, p.Base, "feature/forked")
@@ -125,7 +125,7 @@ func TestEnsureWorktreeBasesOffChosenBranch(t *testing.T) {
 	commitFile(t, filepath.Join(p.Dir, "branch1"), "b1.txt", "b1", "branch1 commit")
 
 	base := func(def string) (string, error) { return "branch1", nil }
-	if _, _, err := p.EnsureWorktree("feature/off-branch1", nil, base, nil); err != nil {
+	if _, _, err := p.EnsureWorktree(EnsureWorktreeOptions{Branch: "feature/off-branch1", PickBase: base}); err != nil {
 		t.Fatalf("EnsureWorktree(feature/off-branch1): %v", err)
 	}
 
@@ -147,7 +147,7 @@ func TestEnsureWorktreeBeforeCreateAbortsOnError(t *testing.T) {
 	p := newTestProject(t)
 	wantErr := errors.New("ticket check failed")
 
-	_, _, err := p.EnsureWorktree("feature/new", nil, baseDefault, func() error { return wantErr })
+	_, _, err := p.EnsureWorktree(EnsureWorktreeOptions{Branch: "feature/new", PickBase: baseDefault, BeforeCreate: func() error { return wantErr }})
 	if !errors.Is(err, wantErr) {
 		t.Fatalf("EnsureWorktree error = %v, want %v", err, wantErr)
 	}
@@ -166,7 +166,7 @@ func TestEnsureWorktreeRejectsFlagLikeBranch(t *testing.T) {
 
 	// Every dash-prefixed name errors before anything is created
 	for _, name := range []string{"--verbose", "-x"} {
-		if _, _, err := p.EnsureWorktree(name, nil, baseDefault, nil); err == nil {
+		if _, _, err := p.EnsureWorktree(EnsureWorktreeOptions{Branch: name, PickBase: baseDefault}); err == nil {
 			t.Errorf("EnsureWorktree(%q) succeeded, want error", name)
 		}
 		if pathExists(filepath.Join(p.Dir, Sanitize(name))) {
@@ -183,9 +183,13 @@ func TestEnsureWorktreeBeforeCreateSkippedForExistingBranch(t *testing.T) {
 	runBaseGit(t, p.Base, "branch", "local/only", "main")
 
 	called := false
-	if _, _, err := p.EnsureWorktree("local/only", nil, baseDefault, func() error {
-		called = true
-		return nil
+	if _, _, err := p.EnsureWorktree(EnsureWorktreeOptions{
+		Branch:   "local/only",
+		PickBase: baseDefault,
+		BeforeCreate: func() error {
+			called = true
+			return nil
+		},
 	}); err != nil {
 		t.Fatalf("EnsureWorktree(local/only): %v", err)
 	}
@@ -216,7 +220,7 @@ func TestEnsureWorktreeWithExplicitBareRepository(t *testing.T) {
 	t.Setenv("GIT_CONFIG_VALUE_0", "explicit")
 
 	// A new branch must resolve main and land on main's tip
-	dir, _, err := p.EnsureWorktree("feature", nil, nil, nil)
+	dir, _, err := p.EnsureWorktree(EnsureWorktreeOptions{Branch: "feature"})
 	if err != nil {
 		t.Fatalf("EnsureWorktree(feature): %v", err)
 	}

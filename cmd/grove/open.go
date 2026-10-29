@@ -35,7 +35,7 @@ func cmdOpen(args []string) {
 		}
 		branch = b
 	}
-	doOpen(p, branch, filter, from, force)
+	doOpen(p, openOptions{Branch: branch, Filter: filter, From: from, Force: force})
 }
 
 // cmdSwitch: bare grove / grove switch / grove BRANCH. Runs grove.json's recipes.
@@ -64,16 +64,34 @@ func cmdSwitch(args []string) {
 			ui.Die("usage: grove BRANCH   (install fzf for an interactive picker)")
 		}
 	}
-	doOpen(p, branch, "", from, force)
+	doOpen(p, openOptions{Branch: branch, From: from, Force: force})
 }
 
-func doOpen(p *project.Project, branch, filter, from string, force bool) {
+// openOptions holds the parsed arguments of an open/switch.
+type openOptions struct {
+	Branch string
+	// Filter is a comma-separated list of recipe types to run; empty runs all.
+	Filter string
+	// From names the base branch for a brand-new branch.
+	From string
+	// Force re-runs the afterFirstOpen bucket on an existing worktree.
+	Force bool
+}
+
+// doOpen ensures the branch's worktree exists and runs grove.json's hooks for it.
+func doOpen(p *project.Project, o openOptions) {
+	branch, filter, force := o.Branch, o.Filter, o.Force
 	cfg := loadCfg(p)
 	beforeCtx := buildBeforeContext(p, branch)
 	beforeCreate := func() error {
 		return recipe.RunBefore(filterRecipes(cfg.BeforeCreateBranch(), filter), beforeCtx)
 	}
-	dir, created, err := p.EnsureWorktree(branch, cfg.Copy, baseResolver(p, from), beforeCreate)
+	dir, created, err := p.EnsureWorktree(project.EnsureWorktreeOptions{
+		Branch:       branch,
+		Copy:         cfg.Copy,
+		PickBase:     baseResolver(p, o.From),
+		BeforeCreate: beforeCreate,
+	})
 	if err != nil {
 		ui.Die(err.Error())
 	}
@@ -186,7 +204,11 @@ func cmdPath(args []string) {
 	branch := trimSlash(args[0])
 	// nil beforeCreate: grove path is used by scripts/tooling, so it never
 	// runs the (interactive-leaning, abortable) beforeCreateBranch bucket.
-	dir, created, err := p.EnsureWorktree(branch, loadCfg(p).Copy, baseResolver(p, from), nil)
+	dir, created, err := p.EnsureWorktree(project.EnsureWorktreeOptions{
+		Branch:   branch,
+		Copy:     loadCfg(p).Copy,
+		PickBase: baseResolver(p, from),
+	})
 	if err != nil {
 		ui.Die(err.Error())
 	}

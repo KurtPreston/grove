@@ -74,26 +74,40 @@ func PullLatest(dir, branch string) bool {
 	return GitQuiet(dir, "merge", "--ff-only", "--quiet", "FETCH_HEAD")
 }
 
-// EnsureWorktree returns the worktree dir for branch, creating it if needed.
-// copyFiles are untracked files copied from the default-branch worktree into
-// freshly created ones. The returned bool reports whether the worktree was
-// created on this call (vs. reused), so callers can drive one-time
-// afterFirstOpen behavior. A reused worktree is returned as-is; callers that
-// want it updated call PullLatest.
-//
-// pickBase chooses which branch a brand-new branch is based off. It is called
-// only when the branch exists neither locally nor on origin — reusing an
-// existing branch never consults it. It receives the project default branch and
-// returns the branch name to base off (return def to keep the historical
-// "off the default branch" behavior). A nil pickBase defaults to def.
-//
-// beforeCreate, if non-nil, is called only when the branch exists neither
-// locally nor on origin (the same brand-new-branch condition that consults
-// pickBase), after the base branch is resolved but before anything is
-// created. Its error aborts creation — nothing is created and the error is
-// returned to the caller. This is the hook point for grove.json's
-// beforeCreateBranch bucket.
-func (p *Project) EnsureWorktree(branch string, copyFiles []string, pickBase func(def string) (string, error), beforeCreate func() error) (string, bool, error) {
+// EnsureWorktreeOptions configures EnsureWorktree.
+type EnsureWorktreeOptions struct {
+	// Branch is the branch whose worktree to find or create.
+	Branch string
+
+	// Copy lists untracked files copied from the default-branch worktree into
+	// freshly created ones.
+	Copy []string
+
+	// PickBase chooses which branch a brand-new branch is based off. It is
+	// called only when the branch exists neither locally nor on origin —
+	// reusing an existing branch never consults it. It receives the project
+	// default branch and returns the branch name to base off (return def to
+	// keep the historical "off the default branch" behavior). A nil PickBase
+	// defaults to def.
+	PickBase func(def string) (string, error)
+
+	// BeforeCreate, if non-nil, is called only when the branch exists neither
+	// locally nor on origin (the same brand-new-branch condition that consults
+	// PickBase), after the base branch is resolved but before anything is
+	// created. Its error aborts creation — nothing is created and the error is
+	// returned to the caller. This is the hook point for grove.json's
+	// beforeCreateBranch bucket.
+	BeforeCreate func() error
+}
+
+// EnsureWorktree returns the worktree dir for opts.Branch, creating it if
+// needed. The returned bool reports whether the worktree was created on this
+// call (vs. reused), so callers can drive one-time afterFirstOpen behavior. A
+// reused worktree is returned as-is; callers that want it updated call
+// PullLatest.
+func (p *Project) EnsureWorktree(opts EnsureWorktreeOptions) (string, bool, error) {
+	branch, pickBase, beforeCreate := opts.Branch, opts.PickBase, opts.BeforeCreate
+
 	// A leading dash means an unrecognized flag, never a branch name.
 	if strings.HasPrefix(branch, "-") {
 		return "", false, fmt.Errorf("unknown option '%s' (branch names cannot start with '-'); see 'grove help'", branch)
@@ -155,7 +169,7 @@ func (p *Project) EnsureWorktree(branch string, copyFiles []string, pickBase fun
 		setUpstream(p.Base, branch)
 	}
 
-	p.setupWorktree(dir, copyFiles)
+	p.setupWorktree(dir, opts.Copy)
 	return dir, true, nil
 }
 

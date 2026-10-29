@@ -285,7 +285,7 @@ func TestBranchSquashMerged(t *testing.T) {
 // commands there must still use the worktree's own .git file.
 func TestWorktreeWithGitLikeFiles(t *testing.T) {
 	p := newTestProject(t)
-	dir, _, err := p.EnsureWorktree("feature", nil, nil, nil)
+	dir, _, err := p.EnsureWorktree(EnsureWorktreeOptions{Branch: "feature"})
 	if err != nil {
 		t.Fatal(err)
 	}
