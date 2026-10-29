@@ -132,11 +132,11 @@ for when and why to enable the recipe.
 | Command | Description |
 |---------|-------------|
 | `grove clone GIT_URL [FOLDER]` | Clone a repo as a bare `.base` plus a worktree for the default branch under `FOLDER` in the current directory, and seed a starter (commented) `grove.jsonc` |
-| `grove BRANCH [--from REF]` | Switch to (or create) BRANCH's worktree and run the hooks in `grove.json`. When BRANCH is new, `beforeCreateBranch` hooks can abort creation, and `--from REF` bases it off REF (see [Choosing the base branch](#choosing-the-base-branch-for-new-branches)). An existing worktree is fast-forwarded to its upstream, fetching only that branch, while the `onOpen` hooks run |
+| `grove BRANCH [--from REF] [--no-fetch]` | Switch to (or create) BRANCH's worktree and run the hooks in `grove.json`. When BRANCH is new, `beforeCreateBranch` hooks can abort creation, and `--from REF` bases it off REF (see [Choosing the base branch](#choosing-the-base-branch-for-new-branches)). Creating a worktree fetches only BRANCH and its base branch from `origin`; an existing worktree is fast-forwarded to its upstream, fetching only that branch, while the `onOpen` hooks run. `--no-fetch` skips both and uses local refs |
 | `grove DIR` | When the argument is an existing directory (e.g. `grove .` or `grove ~/Code/slakkr`), run its `onOpen` recipes in place — equivalent to `cd DIR && grove here` (see [Launching any folder](#launching-any-folder)). A directory path takes precedence over the branch interpretation |
-| `grove open [BRANCH] [TYPES] [--force]` | Open BRANCH (or the current worktree's branch if omitted/`.`); `TYPES` (comma-separated) filters the configured hooks to those recipe types; `--force` re-runs the `afterFirstOpen` bucket |
-| `grove switch [BRANCH]` | Like a bare BRANCH; with no branch and `fzf` installed, opens a picker |
-| `grove path BRANCH` | Resolve (creating if needed) BRANCH's worktree, fast-forwarding an existing one to its upstream, and print its absolute path to stdout |
+| `grove open [BRANCH] [TYPES] [--force] [--no-fetch]` | Open BRANCH (or the current worktree's branch if omitted/`.`); `TYPES` (comma-separated) filters the configured hooks to those recipe types; `--force` re-runs the `afterFirstOpen` bucket |
+| `grove switch [BRANCH] [--no-fetch]` | Like a bare BRANCH; with no branch and `fzf` installed, opens a picker |
+| `grove path BRANCH [--from REF] [--no-fetch]` | Resolve (creating if needed) BRANCH's worktree, fast-forwarding an existing one to its upstream, and print its absolute path to stdout |
 | `grove tmux` | Attach the project's tmux session, building a window for every worktree |
 | `grove list` / `ls [-t] [--porcelain] [--no-status]` | List worktrees with each branch's last commit time and a `*` for local changes; `-t` orders newest first; `--porcelain` prints `branch<TAB>path`; `--no-status` skips the local-changes check (see [Listing large repos](#listing-large-repos)) |
 | `grove prune [--dry-run] [--force] [--keep-branches] [--remote \| --no-remote]` | Remove worktrees whose branches are merged, including squash/rebase merges and detached worktrees whose commits landed, and delete merged branches locally and on `origin` (see [Prune detection](#prune-detection)); never-pushed branches are left alone. A worktree with local changes is kept unless `--force`/`-f` is passed. `--keep-branches` removes only worktrees. `--remote`/`--no-remote` answer the `origin` prompt up front. `--dry-run`/`-n` lists candidates without removing anything |
@@ -185,6 +185,19 @@ grove feature/b                 # prompts for the base branch
 grove feature/b --from main     # base off main, no prompt
 grove feature/b --from feature/a  # stack feature/b on top of feature/a
 ```
+
+Before creating the branch, grove fetches just two things from `origin`: the
+branch itself, in case a teammate already pushed it, and the base branch, so
+the new branch starts from its latest commit. Other branches and tags aren't
+fetched, which keeps creation fast in repositories with thousands of branches.
+If `origin` can't be reached, grove warns and uses local refs.
+
+Pass `--no-fetch` to skip contacting `origin` entirely, or set `"fetch": false`
+in `grove.json` to make that the default. The new branch then starts from the
+base as last fetched, and a branch that exists only on `origin` but was never
+fetched is created fresh instead of tracked. Run `git fetch` yourself first when
+that matters. The interactive base-branch picker always lists only branches
+already fetched.
 
 ## Hooks
 
@@ -543,6 +556,7 @@ autocomplete and inline validation.
 | `copy` | `[".env"]` | Untracked files copied from the default-branch worktree into new worktrees |
 | `hooks` | `{ "onOpen": [{ "type": "tmux" }] }` | The three lifecycle buckets, each an ordered array of recipes (see [Hooks](#hooks)) |
 | `prune` | _(see below)_ | Tunes how `grove prune` decides which branches count as merged (see [Prune detection](#prune-detection)) |
+| `fetch` | `true` | Whether opening a branch contacts `origin`; `false` works from local refs, like `--no-fetch` (see [Choosing the base branch](#choosing-the-base-branch-for-new-branches)) |
 | `list` | `{ "status": true, "statusTimeout": 2 }` | Tunes `grove list`'s local-changes check (see [Listing large repos](#listing-large-repos)) |
 
 When `grove.json` is absent, or its `hooks` key is omitted, grove falls back to

@@ -767,7 +767,8 @@ func usage() {
 
 Usage:
   grove clone GIT_URL [FOLDER]   Clone a repo (under FOLDER in the current dir) as a bare .base + default worktree
-  grove BRANCH [--from REF]      Switch to (or create) BRANCH's worktree; run grove.json recipes
+  grove BRANCH [--from REF] [--no-fetch]
+                                 Switch to (or create) BRANCH's worktree; run grove.json recipes
   grove DIR                      If DIR is an existing directory, run user-level recipes for it (like 'cd DIR && grove here')
   grove open [BRANCH] [TYPES]    Open BRANCH (or current); TYPES filters grove.json recipes by type
   grove switch [BRANCH]          Like a bare BRANCH; no BRANCH opens an fzf picker
@@ -798,6 +799,10 @@ If stdin is a TTY, grove then asks which branch to base the new branch off (fzf
 when available, else a numbered menu). Pass --from REF to choose the base without
 being asked (also used by scripts and non-TTY sessions); otherwise the new branch
 is based off the default branch.
+
+Creating a worktree fetches only the branch and its base branch from origin.
+Pass --no-fetch to open/switch/path (or set "fetch": false in grove.json) to skip
+contacting origin and use local refs.
 
 Worktree folders deleted outside grove (e.g. 'rm -rf') are reconciled automatically
 on the next command: grove drops git's stale bookkeeping so the worktree stops
