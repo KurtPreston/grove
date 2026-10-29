@@ -52,6 +52,17 @@ type Config struct {
 	// List configures `grove list`. When omitted, the local-changes check is on
 	// with a DefaultListStatusTimeout cap.
 	List *ListConfig `json:"list,omitempty"`
+	// Fetch lets grove contact origin when opening a branch: to fetch the
+	// branch and its base while creating a worktree, and to fast-forward a
+	// reused one. Defaults to true when nil; false works from local refs only,
+	// like --no-fetch.
+	Fetch *bool `json:"fetch,omitempty"`
+}
+
+// FetchEnabled reports whether opening a branch may fetch from origin (the
+// default).
+func (c Config) FetchEnabled() bool {
+	return c.Fetch == nil || *c.Fetch
 }
 
 // DefaultListStatusTimeout is how long `grove list` waits, in total, for its

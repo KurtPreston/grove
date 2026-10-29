@@ -20,6 +20,7 @@ func cmdOpen(args []string) {
 	p := mustResolve()
 	args, force := popForce(args)
 	args, from := popFrom(args)
+	args, noFetch := popNoFetch(args)
 	branch := ""
 	filter := ""
 	if len(args) >= 1 {
@@ -35,7 +36,7 @@ func cmdOpen(args []string) {
 		}
 		branch = b
 	}
-	doOpen(p, openOptions{Branch: branch, Filter: filter, From: from, Force: force})
+	doOpen(p, openOptions{Branch: branch, Filter: filter, From: from, Force: force, NoFetch: noFetch})
 }
 
 // cmdSwitch: bare grove / grove switch / grove BRANCH. Runs grove.json's recipes.
@@ -50,6 +51,7 @@ func cmdSwitch(args []string) {
 	p := mustResolve()
 	args, force := popForce(args)
 	args, from := popFrom(args)
+	args, noFetch := popNoFetch(args)
 	branch := ""
 	if len(args) >= 1 {
 		branch = trimSlash(args[0])
@@ -64,7 +66,7 @@ func cmdSwitch(args []string) {
 			ui.Die("usage: grove BRANCH   (install fzf for an interactive picker)")
 		}
 	}
-	doOpen(p, openOptions{Branch: branch, From: from, Force: force})
+	doOpen(p, openOptions{Branch: branch, From: from, Force: force, NoFetch: noFetch})
 }
 
 // openOptions holds the parsed arguments of an open/switch.
@@ -76,12 +78,15 @@ type openOptions struct {
 	From string
 	// Force re-runs the afterFirstOpen bucket on an existing worktree.
 	Force bool
+	// NoFetch works from local refs without contacting origin.
+	NoFetch bool
 }
 
 // doOpen ensures the branch's worktree exists and runs grove.json's hooks for it.
 func doOpen(p *project.Project, o openOptions) {
 	branch, filter, force := o.Branch, o.Filter, o.Force
 	cfg := loadCfg(p)
+	noFetch := o.NoFetch || !cfg.FetchEnabled()
 	beforeCtx := buildBeforeContext(p, branch)
 	beforeCreate := func() error {
 		return recipe.RunBefore(filterRecipes(cfg.BeforeCreateBranch(), filter), beforeCtx)
@@ -91,6 +96,7 @@ func doOpen(p *project.Project, o openOptions) {
 		Copy:         cfg.Copy,
 		PickBase:     baseResolver(p, o.From),
 		BeforeCreate: beforeCreate,
+		NoFetch:      noFetch,
 	})
 	if err != nil {
 		ui.Die(err.Error())
@@ -101,7 +107,7 @@ func doOpen(p *project.Project, o openOptions) {
 	// waiting on the network.
 	waitPull := func() {}
 	if !created {
-		waitPull = startPull(dir, branch)
+		waitPull = startPull(dir, branch, noFetch)
 	}
 	recipe.Run(filterRecipes(cfg.OnOpen(), filter), ctx)
 	waitPull()
@@ -112,8 +118,12 @@ func doOpen(p *project.Project, o openOptions) {
 
 // startPull fast-forwards the worktree at dir in the background and returns a
 // function that waits for it and reports the outcome. Reporting is left to the
-// waiter so output never interleaves with whatever runs in the meantime.
-func startPull(dir, branch string) func() {
+// waiter so output never interleaves with whatever runs in the meantime. With
+// noFetch it skips the pull, which would contact origin, and just says so.
+func startPull(dir, branch string, noFetch bool) func() {
+	if noFetch {
+		return func() { ui.Info("Skipped pull (fetch disabled); using local refs.") }
+	}
 	done := make(chan bool, 1)
 	go func() { done <- project.PullLatest(dir, branch) }()
 	return func() {
@@ -171,6 +181,20 @@ func popForce(args []string) ([]string, bool) {
 	return out, force
 }
 
+// popNoFetch removes --no-fetch from args, reporting whether it was present.
+func popNoFetch(args []string) ([]string, bool) {
+	var out []string
+	noFetch := false
+	for _, a := range args {
+		if a == "--no-fetch" {
+			noFetch = true
+			continue
+		}
+		out = append(out, a)
+	}
+	return out, noFetch
+}
+
 // popFrom removes --from REF / --from=REF from args, returning the ref ("" when
 // absent). It names the base branch for a brand-new branch, bypassing the
 // interactive base-branch picker.
@@ -198,22 +222,26 @@ func popFrom(args []string) ([]string, string) {
 func cmdPath(args []string) {
 	p := mustResolve()
 	args, from := popFrom(args)
+	args, noFetch := popNoFetch(args)
 	if len(args) < 1 {
 		ui.Die("usage: grove path BRANCH")
 	}
 	branch := trimSlash(args[0])
+	cfg := loadCfg(p)
+	noFetch = noFetch || !cfg.FetchEnabled()
 	// nil beforeCreate: grove path is used by scripts/tooling, so it never
 	// runs the (interactive-leaning, abortable) beforeCreateBranch bucket.
 	dir, created, err := p.EnsureWorktree(project.EnsureWorktreeOptions{
 		Branch:   branch,
-		Copy:     loadCfg(p).Copy,
+		Copy:     cfg.Copy,
 		PickBase: baseResolver(p, from),
+		NoFetch:  noFetch,
 	})
 	if err != nil {
 		ui.Die(err.Error())
 	}
 	if !created {
-		startPull(dir, branch)()
+		startPull(dir, branch, noFetch)()
 	}
 	fmt.Println(dir)
 }

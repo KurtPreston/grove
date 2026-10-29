@@ -2,6 +2,7 @@ package project
 
 import (
 	"errors"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -226,5 +227,134 @@ func TestEnsureWorktreeWithExplicitBareRepository(t *testing.T) {
 	}
 	if got, want := revParse(t, dir, "feature"), revParse(t, dir, "main"); got != want {
 		t.Errorf("feature tip = %s, want main tip %s", got, want)
+	}
+}
+
+// newClonedProject clones a fresh origin through Clone, so origin/* refs are
+// laid out as in a real grove project, and returns the project and the origin
+// repository's path.
+func newClonedProject(t *testing.T) (*Project, string) {
+	t.Helper()
+	root := t.TempDir()
+	src := filepath.Join(root, "src")
+	if err := os.MkdirAll(src, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, src, "init", "-q")
+	runGit(t, src, "commit", "-q", "--allow-empty", "-m", "init")
+
+	p, _, _, err := Clone(src, filepath.Join(root, "proj"), nil)
+	if err != nil {
+		t.Fatalf("Clone: %v", err)
+	}
+	return p, src
+}
+
+// hasOriginRef reports whether the project has fetched origin/<branch>.
+func hasOriginRef(p *Project, branch string) bool {
+	return GitQuiet(p.Base, "--git-dir=.", "show-ref", "--verify", "--quiet", "refs/remotes/origin/"+branch)
+}
+
+// TestEnsureWorktreeNoFetchUsesLocalRefs verifies NoFetch never contacts
+// origin: a new branch starts from the stale local origin/main, and branches
+// pushed to origin since the clone stay unfetched.
+func TestEnsureWorktreeNoFetchUsesLocalRefs(t *testing.T) {
+	p, src := newClonedProject(t)
+	staleMain := baseRevParse(t, p.Base, "origin/main")
+
+	// Origin moves on after the clone
+	runGit(t, src, "commit", "-q", "--allow-empty", "-m", "upstream work")
+	runGit(t, src, "branch", "teammate")
+
+	opts := EnsureWorktreeOptions{Branch: "feature", PickBase: baseDefault, NoFetch: true}
+	if _, _, err := p.EnsureWorktree(opts); err != nil {
+		t.Fatalf("EnsureWorktree(feature): %v", err)
+	}
+
+	// The branch is based on what was already local, and nothing was fetched
+	if got := baseRevParse(t, p.Base, "feature"); got != staleMain {
+		t.Errorf("feature tip = %s, want stale origin/main %s", got, staleMain)
+	}
+	if got := baseRevParse(t, p.Base, "origin/main"); got != staleMain {
+		t.Errorf("origin/main moved to %s; NoFetch should not fetch", got)
+	}
+	if hasOriginRef(p, "teammate") {
+		t.Error("origin/teammate was fetched despite NoFetch")
+	}
+}
+
+// TestEnsureWorktreeFetchesOnlyBaseBranch verifies a brand-new branch starts
+// from origin's latest base branch, while origin's other branches are left
+// unfetched.
+func TestEnsureWorktreeFetchesOnlyBaseBranch(t *testing.T) {
+	p, src := newClonedProject(t)
+
+	// Origin gains a commit on main plus an unrelated branch
+	runGit(t, src, "commit", "-q", "--allow-empty", "-m", "upstream work")
+	runGit(t, src, "branch", "unrelated")
+
+	if _, _, err := p.EnsureWorktree(EnsureWorktreeOptions{Branch: "feature", PickBase: baseDefault}); err != nil {
+		t.Fatalf("EnsureWorktree(feature): %v", err)
+	}
+
+	// The new branch starts from origin's new main tip
+	if got, want := baseRevParse(t, p.Base, "feature"), revParse(t, src, "main"); got != want {
+		t.Errorf("feature tip = %s, want origin main tip %s", got, want)
+	}
+	assertTracksOrigin(t, p.Base, "feature")
+	if hasOriginRef(p, "unrelated") {
+		t.Error("origin/unrelated was fetched; only the base branch should be")
+	}
+}
+
+// TestEnsureWorktreeTracksUnfetchedRemoteBranch verifies a teammate's branch
+// pushed after the clone, so never fetched, is found on origin and tracked
+// rather than recreated as a brand-new branch.
+func TestEnsureWorktreeTracksUnfetchedRemoteBranch(t *testing.T) {
+	p, src := newClonedProject(t)
+
+	// A teammate pushes a branch with its own commit
+	runGit(t, src, "checkout", "-q", "-b", "teammate")
+	runGit(t, src, "commit", "-q", "--allow-empty", "-m", "teammate work")
+	runGit(t, src, "checkout", "-q", "main")
+
+	// Reusing a branch must not consult the new-branch callbacks
+	opts := EnsureWorktreeOptions{
+		Branch:       "teammate",
+		PickBase:     func(string) (string, error) { return "", errors.New("PickBase called") },
+		BeforeCreate: func() error { return errors.New("BeforeCreate called") },
+	}
+	if _, _, err := p.EnsureWorktree(opts); err != nil {
+		t.Fatalf("EnsureWorktree(teammate): %v", err)
+	}
+	if got, want := baseRevParse(t, p.Base, "teammate"), revParse(t, src, "teammate"); got != want {
+		t.Errorf("teammate tip = %s, want origin teammate tip %s", got, want)
+	}
+	assertTracksOrigin(t, p.Base, "teammate")
+}
+
+// TestEnsureWorktreeFallsBackWhenOriginUnreachable verifies a failed fetch
+// only warns: the branch is still created from the local origin/main.
+func TestEnsureWorktreeFallsBackWhenOriginUnreachable(t *testing.T) {
+	p, _ := newClonedProject(t)
+	runBaseGit(t, p.Base, "remote", "set-url", "origin", filepath.Join(t.TempDir(), "missing"))
+
+	if _, _, err := p.EnsureWorktree(EnsureWorktreeOptions{Branch: "feature", PickBase: baseDefault}); err != nil {
+		t.Fatalf("EnsureWorktree(feature): %v", err)
+	}
+	if got, want := baseRevParse(t, p.Base, "feature"), baseRevParse(t, p.Base, "origin/main"); got != want {
+		t.Errorf("feature tip = %s, want local origin/main %s", got, want)
+	}
+}
+
+// TestLsRemoteHasMatchesExactRef verifies a ref whose name only ends in the
+// wanted ref doesn't count as a match.
+func TestLsRemoteHasMatchesExactRef(t *testing.T) {
+	out := "abc123\trefs/heads/team/feature\n"
+	if lsRemoteHas(out, "refs/heads/feature") {
+		t.Error("refs/heads/team/feature matched refs/heads/feature")
+	}
+	if !lsRemoteHas(out+"def456\trefs/heads/feature\n", "refs/heads/feature") {
+		t.Error("refs/heads/feature not matched")
 	}
 }

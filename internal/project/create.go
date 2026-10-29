@@ -98,6 +98,11 @@ type EnsureWorktreeOptions struct {
 	// returned to the caller. This is the hook point for grove.json's
 	// beforeCreateBranch bucket.
 	BeforeCreate func() error
+
+	// NoFetch skips contacting origin, so creation uses local refs only. By
+	// default grove fetches just the branch itself and, for a brand-new branch,
+	// its base branch.
+	NoFetch bool
 }
 
 // EnsureWorktree returns the worktree dir for opts.Branch, creating it if
@@ -106,7 +111,7 @@ type EnsureWorktreeOptions struct {
 // reused worktree is returned as-is; callers that want it updated call
 // PullLatest.
 func (p *Project) EnsureWorktree(opts EnsureWorktreeOptions) (string, bool, error) {
-	branch, pickBase, beforeCreate := opts.Branch, opts.PickBase, opts.BeforeCreate
+	branch := opts.Branch
 
 	// A leading dash means an unrecognized flag, never a branch name.
 	if strings.HasPrefix(branch, "-") {
@@ -117,19 +122,24 @@ func (p *Project) EnsureWorktree(opts EnsureWorktreeOptions) (string, bool, erro
 		return dir, false, nil
 	}
 
-	ui.Info("Fetching latest...")
-	if !GitQuiet(p.Base, "--git-dir=.", "fetch", "origin") {
-		ui.Warn("fetch failed; using local refs.")
-	}
-
-	def := p.DefaultBranch()
 	dir := filepath.Join(p.Dir, Sanitize(branch))
 	if pathExists(dir) {
 		return "", false, fmt.Errorf("%s already exists but is not a worktree for '%s'", dir, branch)
 	}
 
+	// A branch that isn't local may be on origin, including one never fetched
+	// before, so ask origin for it unless fetching is off
+	fetcher := &originFetcher{base: p.Base, off: opts.NoFetch}
+	local := GitQuiet(p.Base, "--git-dir=.", "show-ref", "--verify", "--quiet", "refs/heads/"+branch)
+	if !local && opts.NoFetch {
+		ui.Info("Skipping fetch; using local refs.")
+	}
+	if !local {
+		fetcher.branch(branch)
+	}
+
 	switch {
-	case GitQuiet(p.Base, "--git-dir=.", "show-ref", "--verify", "--quiet", "refs/heads/"+branch):
+	case local:
 		ui.Info(fmt.Sprintf("Creating worktree for existing local branch '%s' at %s", branch, dir))
 		if err := Git(p.Base, "--git-dir=.", "worktree", "add", dir, branch); err != nil {
 			return "", false, fmt.Errorf("worktree add failed")
@@ -141,36 +151,53 @@ func (p *Project) EnsureWorktree(opts EnsureWorktreeOptions) (string, bool, erro
 			return "", false, fmt.Errorf("worktree add failed")
 		}
 	default:
-		baseBranch := def
-		if pickBase != nil {
-			chosen, err := pickBase(def)
-			if err != nil {
-				return "", false, err
-			}
-			if chosen != "" {
-				baseBranch = chosen
-			}
-		}
-		baseRef, err := p.resolveBaseRef(baseBranch)
-		if err != nil {
+		if err := p.createBranch(opts, dir, fetcher); err != nil {
 			return "", false, err
 		}
-		if beforeCreate != nil {
-			if err := beforeCreate(); err != nil {
-				return "", false, err
-			}
-		}
-		ui.Info(fmt.Sprintf("Creating new branch '%s' off %s at %s", branch, baseRef, dir))
-		// --no-track so autoSetupMerge doesn't point upstream at the base ref; we
-		// then track the same-named branch so a plain push/pull targets origin/<branch>.
-		if err := Git(p.Base, "--git-dir=.", "worktree", "add", "--no-track", "-b", branch, dir, baseRef); err != nil {
-			return "", false, fmt.Errorf("worktree add failed")
-		}
-		setUpstream(p.Base, branch)
 	}
 
 	p.setupWorktree(dir, opts.Copy)
 	return dir, true, nil
+}
+
+// createBranch creates opts.Branch as a brand-new branch with a worktree at
+// dir. It asks opts.PickBase for the base branch, brings that base up to date
+// from origin, then runs opts.BeforeCreate, which can abort before anything is
+// created.
+func (p *Project) createBranch(opts EnsureWorktreeOptions, dir string, fetcher *originFetcher) error {
+	// Choose the base branch, defaulting to the project default
+	def := p.DefaultBranch()
+	baseBranch := def
+	if opts.PickBase != nil {
+		chosen, err := opts.PickBase(def)
+		if err != nil {
+			return err
+		}
+		if chosen != "" {
+			baseBranch = chosen
+		}
+	}
+
+	// Update the base from origin, then resolve it to a concrete ref
+	fetcher.branch(baseBranch)
+	baseRef, err := p.resolveBaseRef(baseBranch)
+	if err != nil {
+		return err
+	}
+	if opts.BeforeCreate != nil {
+		if err := opts.BeforeCreate(); err != nil {
+			return err
+		}
+	}
+
+	// --no-track so autoSetupMerge doesn't point upstream at the base ref; we
+	// then track the same-named branch so a plain push/pull targets origin/<branch>.
+	ui.Info(fmt.Sprintf("Creating new branch '%s' off %s at %s", opts.Branch, baseRef, dir))
+	if err := Git(p.Base, "--git-dir=.", "worktree", "add", "--no-track", "-b", opts.Branch, dir, baseRef); err != nil {
+		return fmt.Errorf("worktree add failed")
+	}
+	setUpstream(p.Base, opts.Branch)
+	return nil
 }
 
 // resolveBaseRef turns a base-branch name into a concrete ref to branch from.
