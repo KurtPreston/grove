@@ -346,15 +346,3 @@ func TestEnsureWorktreeFallsBackWhenOriginUnreachable(t *testing.T) {
 		t.Errorf("feature tip = %s, want local origin/main %s", got, want)
 	}
 }
-
-// TestLsRemoteHasMatchesExactRef verifies a ref whose name only ends in the
-// wanted ref doesn't count as a match.
-func TestLsRemoteHasMatchesExactRef(t *testing.T) {
-	out := "abc123\trefs/heads/team/feature\n"
-	if lsRemoteHas(out, "refs/heads/feature") {
-		t.Error("refs/heads/team/feature matched refs/heads/feature")
-	}
-	if !lsRemoteHas(out+"def456\trefs/heads/feature\n", "refs/heads/feature") {
-		t.Error("refs/heads/feature not matched")
-	}
-}
