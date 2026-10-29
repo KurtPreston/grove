@@ -32,10 +32,10 @@ var pathArgIndex = map[string][]int{
 
 // completeFlags maps a subcommand to its supported flags for completion.
 var completeFlags = map[string][]string{
-	"open":   {"--force", "-f", "--from"},
-	"switch": {"--force", "-f", "--from"},
-	"sw":     {"--force", "-f", "--from"},
-	"path":   {"--from"},
+	"open":   {"--force", "-f", "--from", "--no-fetch"},
+	"switch": {"--force", "-f", "--from", "--no-fetch"},
+	"sw":     {"--force", "-f", "--from", "--no-fetch"},
+	"path":   {"--from", "--no-fetch"},
 	"prune":  {"--dry-run", "-n", "--force", "-f", "--keep-branches", "--remote", "--no-remote"},
 	"rm":     {"--force", "-f"},
 	"remove": {"--force", "-f"},
@@ -109,7 +109,7 @@ func parseCompleteWords(words []string) (cmd string, argIdx int, positional []st
 			i += 2
 			continue
 		}
-		if w == "--force" || w == "-f" || w == "--dry-run" || w == "-n" || w == "--porcelain" || w == "-t" || w == "--time" {
+		if w == "--force" || w == "-f" || w == "--dry-run" || w == "-n" || w == "--porcelain" || w == "-t" || w == "--time" || w == "--no-fetch" {
 			i++
 			continue
 		}

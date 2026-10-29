@@ -307,3 +307,14 @@ func TestWantsHelp(t *testing.T) {
 		}
 	}
 }
+
+func TestPopNoFetch(t *testing.T) {
+	// The flag is removed wherever it appears; other args keep their order
+	args, noFetch := popNoFetch([]string{"feature", "--no-fetch", "--from", "main"})
+	if !noFetch || strings.Join(args, " ") != "feature --from main" {
+		t.Errorf("popNoFetch = %v, %v; want [feature --from main], true", args, noFetch)
+	}
+	if _, noFetch := popNoFetch([]string{"feature"}); noFetch {
+		t.Error("popNoFetch reported --no-fetch when absent")
+	}
+}

@@ -78,6 +78,10 @@
         }
       }
     },
+    "fetch": {
+      "type": "boolean",
+      "description": "Let grove contact origin when opening a branch (default: true): creating a worktree fetches only that branch and its base branch, and reopening one fast-forwards it. Set false to work from local refs only; `--no-fetch` does the same for one run."
+    },
     "list": {
       "type": "object",
       "additionalProperties": false,
