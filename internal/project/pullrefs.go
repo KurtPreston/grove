@@ -99,7 +99,9 @@ func (p *Project) PullLanded(ref, into string) bool {
 // patchID returns the stable patch ID of the diff from one commit to another,
 // or "" when the diff is empty or git fails.
 func (p *Project) patchID(from, to string) string {
-	diff, err := GitOut(p.Base, "--git-dir=.", "diff-tree", "-p", "--no-color", "--no-ext-diff", from, to, "--")
+	// Zero context, so a squash onto a newer default branch whose surrounding
+	// lines moved still matches the request's own changed lines
+	diff, err := GitOut(p.Base, "--git-dir=.", "diff-tree", "-p", "-U0", "--no-color", "--no-ext-diff", from, to, "--")
 	if err != nil || strings.TrimSpace(diff) == "" {
 		return ""
 	}

@@ -108,3 +108,26 @@ func TestPullLanded(t *testing.T) {
 		t.Error("unmerged #11 counted as landed")
 	}
 }
+
+// TestPullLandedContextMoved checks that a request still counts as landed when
+// the default branch changed lines next to its edit before the squash, so the
+// squash's diff carries different context than the request's own.
+func TestPullLandedContextMoved(t *testing.T) {
+	p := newMergeRepo(t)
+	commitFile(t, p.Dir, "f.txt", "a\nb\nc\nd\ne\nf\ng\n", "c0")
+
+	// Request #12 edits one line
+	runGit(t, p.Dir, "checkout", "-q", "-b", "pr-12")
+	commitFile(t, p.Dir, "f.txt", "a\nb\nc\nd\nE\nf\ng\n", "edit e")
+	runGit(t, p.Dir, "update-ref", "refs/grove/pull/12", "pr-12")
+
+	// Main edits a line within the diff context, then squashes the request on top
+	runGit(t, p.Dir, "checkout", "-q", "main")
+	commitFile(t, p.Dir, "f.txt", "a\nB\nc\nd\ne\nf\ng\n", "edit b")
+	runGit(t, p.Dir, "merge", "-q", "--squash", "pr-12")
+	runGit(t, p.Dir, "commit", "-q", "-m", "edit e (#12)")
+
+	if !p.PullLanded("refs/grove/pull/12", "main") {
+		t.Error("squash-merged #12 with moved context not landed")
+	}
+}
