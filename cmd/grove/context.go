@@ -22,6 +22,7 @@ func buildContext(p *project.Project, branch, dir string, created bool) recipe.C
 		DefaultBranch: p.DefaultBranch(),
 		InSSH:         inSSH,
 		Created:       created,
+		Interactive:   isInteractive(),
 	}
 }
 
@@ -41,6 +42,7 @@ func buildBeforeContext(p *project.Project, branch string) recipe.Context {
 		Base:          p.Base,
 		DefaultBranch: p.DefaultBranch(),
 		InSSH:         inSSH,
+		Interactive:   isInteractive(),
 	}
 }
 
@@ -51,12 +53,13 @@ func buildBeforeContext(p *project.Project, branch string) recipe.Context {
 func buildLaunchContext(name, dir string) recipe.Context {
 	hex := color.ForBranch(name)
 	return recipe.Context{
-		Branch:     name,
-		Dir:        dir,
-		Color:      hex,
-		Fg:         color.FgForHex(hex),
-		Project:    name,
-		ProjectDir: dir,
-		InSSH:      inSSH,
+		Branch:      name,
+		Dir:         dir,
+		Color:       hex,
+		Fg:          color.FgForHex(hex),
+		Project:     name,
+		ProjectDir:  dir,
+		InSSH:       inSSH,
+		Interactive: isInteractive(),
 	}
 }

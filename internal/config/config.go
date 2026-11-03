@@ -266,6 +266,10 @@ func (h *Hooks) migrateLegacy() {
 type RecipeConfig struct {
 	Type string `json:"type"`
 
+	// InteractiveOnly skips the recipe when grove isn't run from a terminal
+	// (stdin not a TTY), e.g. an editor launch a script doesn't need.
+	InteractiveOnly bool `json:"interactiveOnly,omitempty"`
+
 	// webhook
 	URL    string         `json:"url,omitempty"`
 	Token  string         `json:"token,omitempty"`

@@ -41,6 +41,11 @@ type Context struct {
 	// tell the two apart; which bucket a recipe lives in already decides
 	// whether it runs (see config.Hooks), so this is informational.
 	Created bool
+
+	// Interactive reports whether grove is running from a terminal (stdin is
+	// a TTY). Recipes marked interactiveOnly are skipped when it's false.
+	// Exported as GROVE_INTERACTIVE.
+	Interactive bool
 }
 
 // Env renders the context as environment variables for external recipes,
@@ -55,6 +60,10 @@ func (c Context) Env() []string {
 	if c.Created {
 		created = "1"
 	}
+	interactive := ""
+	if c.Interactive {
+		interactive = "1"
+	}
 	for _, kv := range [][2]string{
 		{"GROVE_BRANCH", c.Branch},
 		{"GROVE_NAME", project.Sanitize(c.Branch)},
@@ -67,6 +76,7 @@ func (c Context) Env() []string {
 		{"GROVE_DEFAULT_BRANCH", c.DefaultBranch},
 		{"GROVE_IN_SSH", inSSH},
 		{"GROVE_CREATED", created},
+		{"GROVE_INTERACTIVE", interactive},
 	} {
 		e = append(e, kv[0]+"="+kv[1])
 	}
@@ -108,10 +118,11 @@ func runOne(ctx Context, rc config.RecipeConfig) error {
 // Run executes each configured recipe in order, warning (but not aborting) on
 // failure - including an unknown type. Used for the onOpen and afterFirstOpen
 // buckets, which react to something that has already happened.
-// Entries without a type are skipped (config.Load already warned).
+// Entries without a type are skipped (config.Load already warned), as are
+// interactiveOnly entries in a non-interactive run.
 func Run(recipes []config.RecipeConfig, ctx Context) {
 	for _, rc := range recipes {
-		if rc.Type == "" {
+		if skip(ctx, rc) {
 			continue
 		}
 		if err := runOne(ctx, rc); err != nil {
@@ -123,10 +134,11 @@ func Run(recipes []config.RecipeConfig, ctx Context) {
 // RunBefore executes each configured recipe in order, stopping at and
 // returning the first error. Used for the beforeCreateBranch bucket: it gates
 // branch creation, so a non-zero exit (or an unknown type) must abort before
-// anything is created. Entries without a type are skipped.
+// anything is created. Entries without a type are skipped, as are
+// interactiveOnly entries in a non-interactive run.
 func RunBefore(recipes []config.RecipeConfig, ctx Context) error {
 	for _, rc := range recipes {
-		if rc.Type == "" {
+		if skip(ctx, rc) {
 			continue
 		}
 		if err := runOne(ctx, rc); err != nil {
@@ -134,6 +146,19 @@ func RunBefore(recipes []config.RecipeConfig, ctx Context) error {
 		}
 	}
 	return nil
+}
+
+// skip reports whether an entry shouldn't run: it has no type, or it's
+// interactiveOnly and grove wasn't run from a terminal.
+func skip(ctx Context, rc config.RecipeConfig) bool {
+	if rc.Type == "" {
+		return true
+	}
+	if rc.InteractiveOnly && !ctx.Interactive {
+		ui.Info("recipe: " + rc.Type + " skipped (interactiveOnly, not a terminal)")
+		return true
+	}
+	return false
 }
 
 // recipeEnv exports a recipe's configuration entry as GROVE_RECIPE_* variables
