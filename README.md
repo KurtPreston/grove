@@ -239,6 +239,31 @@ need cleaning up if it's wrong. It is **not** run by `grove path` (used by
 scripts/tooling) and is skipped when reusing an existing branch, since there's
 nothing left to gate.
 
+### Interactive-only recipes
+
+Add `"interactiveOnly": true` to any recipe to run it only when grove is started
+from a terminal (stdin is a TTY). When a script, pipe, or agent shell runs
+`grove BRANCH`, grove skips that recipe and runs the rest, so automation can
+provision a worktree and its one-time setup without opening an editor window:
+
+```json
+{
+  "hooks": {
+    "onOpen": [
+      { "type": "vscode-color-config" },
+      { "type": "command", "command": "zed $GROVE_DIR", "interactiveOnly": true }
+    ],
+    "afterFirstOpen": [
+      { "type": "command", "command": "yarn install" }
+    ]
+  }
+}
+```
+
+It works in every bucket, so it can also mark a `beforeCreateBranch` prompt
+that only makes sense when a human can answer. Recipes see the same check as
+`GROVE_INTERACTIVE`.
+
 > **Renamed:** `afterFirstOpen` was previously called `onCreateWorktree` and ran
 > *before* `onOpen`. The old key is still accepted as a deprecated alias (grove
 > folds it into `afterFirstOpen` with a warning), but note the order flipped:
@@ -385,6 +410,7 @@ your `PATH`. grove invokes it with the following environment:
 | `GROVE_DEFAULT_BRANCH` | the repo's default branch |
 | `GROVE_IN_SSH` | `1` when running inside an SSH session |
 | `GROVE_CREATED` | `1` when the worktree was created on this invocation (vs. reopened) |
+| `GROVE_INTERACTIVE` | `1` when grove was started from a terminal (stdin is a TTY) |
 | `GROVE_RECIPE_*` | the recipe entry's own fields (`GROVE_RECIPE_URL`, `GROVE_RECIPE_TOKEN`, `GROVE_RECIPE_LAYOUT`, `GROVE_RECIPE_COMMAND`, `GROVE_RECIPE_SHELL`, plus string `params` keys) |
 
 For a `beforeCreateBranch` entry, the external recipe's exit code is the gate:
