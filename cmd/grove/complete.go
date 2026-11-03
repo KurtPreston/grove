@@ -32,10 +32,10 @@ var pathArgIndex = map[string][]int{
 
 // completeFlags maps a subcommand to its supported flags for completion.
 var completeFlags = map[string][]string{
-	"open":   {"--force", "-f", "--from", "--no-fetch"},
-	"switch": {"--force", "-f", "--from", "--no-fetch"},
-	"sw":     {"--force", "-f", "--from", "--no-fetch"},
-	"path":   {"--from", "--no-fetch"},
+	"open":   {"--force", "-f", "--from", "--no-fetch", "--sparse", "--full"},
+	"switch": {"--force", "-f", "--from", "--no-fetch", "--sparse", "--full"},
+	"sw":     {"--force", "-f", "--from", "--no-fetch", "--sparse", "--full"},
+	"path":   {"--from", "--no-fetch", "--sparse", "--full"},
 	"prune":  {"--dry-run", "-n", "--force", "-f", "--keep-branches", "--remote", "--no-remote"},
 	"rm":     {"--force", "-f"},
 	"remove": {"--force", "-f"},
@@ -56,6 +56,11 @@ func cmdComplete(args []string) {
 
 	if len(prior) > 0 && prior[len(prior)-1] == "--from" {
 		printCompleteBranches(cur)
+		return
+	}
+
+	// --sparse takes repository folders, which don't resolve from the cwd
+	if len(prior) > 0 && prior[len(prior)-1] == "--sparse" {
 		return
 	}
 
@@ -105,11 +110,11 @@ func parseCompleteWords(words []string) (cmd string, argIdx int, positional []st
 	i := 0
 	for i < len(words) {
 		w := words[i]
-		if w == "--from" {
+		if w == "--from" || w == "--sparse" {
 			i += 2
 			continue
 		}
-		if w == "--force" || w == "-f" || w == "--dry-run" || w == "-n" || w == "--porcelain" || w == "-t" || w == "--time" || w == "--no-fetch" {
+		if w == "--force" || w == "-f" || w == "--dry-run" || w == "-n" || w == "--porcelain" || w == "-t" || w == "--time" || w == "--no-fetch" || w == "--full" {
 			i++
 			continue
 		}

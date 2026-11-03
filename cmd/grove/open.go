@@ -21,6 +21,7 @@ func cmdOpen(args []string) {
 	args, force := popForce(args)
 	args, from := popFrom(args)
 	args, noFetch := popNoFetch(args)
+	args, sparse := popSparse(args)
 	branch := ""
 	filter := ""
 	if len(args) >= 1 {
@@ -36,7 +37,7 @@ func cmdOpen(args []string) {
 		}
 		branch = b
 	}
-	doOpen(p, openOptions{Branch: branch, Filter: filter, From: from, Force: force, NoFetch: noFetch})
+	doOpen(p, openOptions{Branch: branch, Filter: filter, From: from, Force: force, NoFetch: noFetch, Sparse: sparse})
 }
 
 // cmdSwitch: bare grove / grove switch / grove BRANCH. Runs grove.json's recipes.
@@ -52,6 +53,7 @@ func cmdSwitch(args []string) {
 	args, force := popForce(args)
 	args, from := popFrom(args)
 	args, noFetch := popNoFetch(args)
+	args, sparse := popSparse(args)
 	branch := ""
 	if len(args) >= 1 {
 		branch = trimSlash(args[0])
@@ -66,7 +68,7 @@ func cmdSwitch(args []string) {
 			ui.Die("usage: grove BRANCH   (install fzf for an interactive picker)")
 		}
 	}
-	doOpen(p, openOptions{Branch: branch, From: from, Force: force, NoFetch: noFetch})
+	doOpen(p, openOptions{Branch: branch, From: from, Force: force, NoFetch: noFetch, Sparse: sparse})
 }
 
 // openOptions holds the parsed arguments of an open/switch.
@@ -80,6 +82,9 @@ type openOptions struct {
 	Force bool
 	// NoFetch works from local refs without contacting origin.
 	NoFetch bool
+	// Sparse holds --sparse/--full, which shape a new worktree's checkout or
+	// reshape an existing one.
+	Sparse sparseFlags
 }
 
 // doOpen ensures the branch's worktree exists and runs grove.json's hooks for it.
@@ -97,6 +102,7 @@ func doOpen(p *project.Project, o openOptions) {
 		PickBase:     baseResolver(p, o.From),
 		BeforeCreate: beforeCreate,
 		NoFetch:      noFetch,
+		Sparse:       o.Sparse.forCreate(cfg),
 	})
 	if err != nil {
 		ui.Die(err.Error())
@@ -107,6 +113,7 @@ func doOpen(p *project.Project, o openOptions) {
 	// waiting on the network.
 	waitPull := func() {}
 	if !created {
+		o.Sparse.reshape(p, dir)
 		waitPull = startPull(dir, branch, noFetch)
 	}
 	recipe.Run(filterRecipes(cfg.OnOpen(), filter), ctx)
@@ -223,6 +230,7 @@ func cmdPath(args []string) {
 	p := mustResolve()
 	args, from := popFrom(args)
 	args, noFetch := popNoFetch(args)
+	args, sparse := popSparse(args)
 	if len(args) < 1 {
 		ui.Die("usage: grove path BRANCH")
 	}
@@ -236,11 +244,13 @@ func cmdPath(args []string) {
 		Copy:     cfg.Copy,
 		PickBase: baseResolver(p, from),
 		NoFetch:  noFetch,
+		Sparse:   sparse.forCreate(cfg),
 	})
 	if err != nil {
 		ui.Die(err.Error())
 	}
 	if !created {
+		sparse.reshape(p, dir)
 		startPull(dir, branch, noFetch)()
 	}
 	fmt.Println(dir)

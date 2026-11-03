@@ -6,6 +6,11 @@
   // Untracked files copied from the default-branch worktree into new worktrees.
   "copy": [".env"],
 
+  // Check out only these folders in new worktrees (plus files at the repo
+  // root), for large monorepos. Omit for a full checkout. Override per run with
+  // --sparse PATHS or --full:
+  // "sparse": ["apps/web", "packages/ui"],
+
   // Hooks group recipes by when they run. Each bucket is an ordered array of
   // recipe entries (a "type" plus that type's settings). See the other files
   // in this folder for more.

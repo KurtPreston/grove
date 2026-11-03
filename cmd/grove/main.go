@@ -715,7 +715,7 @@ func usage() {
 
 Usage:
   grove clone GIT_URL [FOLDER]   Clone a repo (under FOLDER in the current dir) as a bare .base + default worktree
-  grove BRANCH [--from REF] [--no-fetch]
+  grove BRANCH [--from REF] [--no-fetch] [--sparse PATHS | --full]
                                  Switch to (or create) BRANCH's worktree; run grove.json recipes
   grove DIR                      If DIR is an existing directory, run user-level recipes for it (like 'cd DIR && grove here')
   grove open [BRANCH] [TYPES]    Open BRANCH (or current); TYPES filters grove.json recipes by type
@@ -751,6 +751,12 @@ is based off the default branch.
 Creating a worktree fetches only the branch and its base branch from origin.
 Pass --no-fetch to open/switch/path (or set "fetch": false in grove.json) to skip
 contacting origin and use local refs.
+
+Set "sparse": ["apps/web", ...] in grove.json to check out only those folders
+(plus files at the repo root) in new worktrees. Pass --sparse PATHS (comma-
+separated) or --full to open/switch/path to override it for one run. On an
+existing worktree, --full widens it to everything, and --sparse narrows it only
+when it has no local changes.
 
 Worktree folders deleted outside grove (e.g. 'rm -rf') are reconciled automatically
 on the next command: grove drops git's stale bookkeeping so the worktree stops

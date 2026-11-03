@@ -103,6 +103,11 @@ type EnsureWorktreeOptions struct {
 	// default grove fetches just the branch itself and, for a brand-new branch,
 	// its base branch.
 	NoFetch bool
+
+	// Sparse lists the folders a freshly created worktree checks out, as a
+	// cone-mode sparse checkout. Nil checks out everything. A reused worktree
+	// is left as it is; callers reshape one with SetSparse.
+	Sparse []string
 }
 
 // EnsureWorktree returns the worktree dir for opts.Branch, creating it if
@@ -141,14 +146,14 @@ func (p *Project) EnsureWorktree(opts EnsureWorktreeOptions) (string, bool, erro
 	switch {
 	case local:
 		ui.Info(fmt.Sprintf("Creating worktree for existing local branch '%s' at %s", branch, dir))
-		if err := Git(p.Base, "--git-dir=.", "worktree", "add", dir, branch); err != nil {
-			return "", false, fmt.Errorf("worktree add failed")
+		if err := p.addWorktree(opts.Sparse, dir, dir, branch); err != nil {
+			return "", false, err
 		}
 		setUpstream(p.Base, branch)
 	case GitQuiet(p.Base, "--git-dir=.", "show-ref", "--verify", "--quiet", "refs/remotes/origin/"+branch):
 		ui.Info(fmt.Sprintf("Creating worktree tracking origin/%s at %s", branch, dir))
-		if err := Git(p.Base, "--git-dir=.", "worktree", "add", "--track", "-b", branch, dir, "origin/"+branch); err != nil {
-			return "", false, fmt.Errorf("worktree add failed")
+		if err := p.addWorktree(opts.Sparse, dir, "--track", "-b", branch, dir, "origin/"+branch); err != nil {
+			return "", false, err
 		}
 	default:
 		if err := p.createBranch(opts, dir, fetcher); err != nil {
@@ -193,11 +198,33 @@ func (p *Project) createBranch(opts EnsureWorktreeOptions, dir string, fetcher *
 	// --no-track so autoSetupMerge doesn't point upstream at the base ref; we
 	// then track the same-named branch so a plain push/pull targets origin/<branch>.
 	ui.Info(fmt.Sprintf("Creating new branch '%s' off %s at %s", opts.Branch, baseRef, dir))
-	if err := Git(p.Base, "--git-dir=.", "worktree", "add", "--no-track", "-b", opts.Branch, dir, baseRef); err != nil {
-		return fmt.Errorf("worktree add failed")
+	if err := p.addWorktree(opts.Sparse, dir, "--no-track", "-b", opts.Branch, dir, baseRef); err != nil {
+		return err
 	}
 	setUpstream(p.Base, opts.Branch)
 	return nil
+}
+
+// addWorktree runs `git worktree add` with args, which include the worktree
+// directory dir. With sparse folders it adds the worktree
+// without checking anything out, then checks out only those folders, so the
+// full tree is never written to disk.
+func (p *Project) addWorktree(sparse []string, dir string, args ...string) error {
+	// Plain full checkout
+	full := append([]string{"--git-dir=.", "worktree", "add"}, args...)
+	if len(sparse) == 0 {
+		if err := Git(p.Base, full...); err != nil {
+			return fmt.Errorf("worktree add failed")
+		}
+		return nil
+	}
+
+	// Sparse: add without files, then populate only the chosen folders
+	noCheckout := append([]string{"--git-dir=.", "worktree", "add", "--no-checkout"}, args...)
+	if err := Git(p.Base, noCheckout...); err != nil {
+		return fmt.Errorf("worktree add failed")
+	}
+	return populateSparse(dir, sparse)
 }
 
 // resolveBaseRef turns a base-branch name into a concrete ref to branch from.

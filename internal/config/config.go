@@ -57,6 +57,10 @@ type Config struct {
 	// reused one. Defaults to true when nil; false works from local refs only,
 	// like --no-fetch.
 	Fetch *bool `json:"fetch,omitempty"`
+	// Sparse lists the folders new worktrees check out, as a cone-mode sparse
+	// checkout; files at the repository root are always included. Omitted or
+	// empty checks out everything. --sparse and --full override it per run.
+	Sparse []string `json:"sparse,omitempty"`
 }
 
 // FetchEnabled reports whether opening a branch may fetch from origin (the
