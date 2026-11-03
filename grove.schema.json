@@ -82,6 +82,11 @@
       "type": "boolean",
       "description": "Let grove contact origin when opening a branch (default: true): creating a worktree fetches only that branch and its base branch, and reopening one fast-forwards it. Set false to work from local refs only; `--no-fetch` does the same for one run."
     },
+    "sparse": {
+      "type": "array",
+      "description": "Folders, relative to the repository root, that new worktrees check out as a cone-mode sparse checkout. Files at the repository root are always included. Omit for a full checkout (the default). `--sparse PATHS` and `--full` override it for one run, and also reshape an existing worktree. Existing worktrees are otherwise left as they are.",
+      "items": { "type": "string", "minLength": 1 }
+    },
     "list": {
       "type": "object",
       "additionalProperties": false,

@@ -132,11 +132,11 @@ for when and why to enable the recipe.
 | Command | Description |
 |---------|-------------|
 | `grove clone GIT_URL [FOLDER]` | Clone a repo as a bare `.base` plus a worktree for the default branch under `FOLDER` in the current directory, and seed a starter (commented) `grove.jsonc` |
-| `grove BRANCH [--from REF] [--no-fetch]` | Switch to (or create) BRANCH's worktree and run the hooks in `grove.json`. When BRANCH is new, `beforeCreateBranch` hooks can abort creation, and `--from REF` bases it off REF (see [Choosing the base branch](#choosing-the-base-branch-for-new-branches)). Creating a worktree fetches only BRANCH and its base branch from `origin`; an existing worktree is fast-forwarded to its upstream, fetching only that branch, while the `onOpen` hooks run. `--no-fetch` skips both and uses local refs |
+| `grove BRANCH [--from REF] [--no-fetch] [--sparse PATHS \| --full]` | Switch to (or create) BRANCH's worktree and run the hooks in `grove.json`. When BRANCH is new, `beforeCreateBranch` hooks can abort creation, and `--from REF` bases it off REF (see [Choosing the base branch](#choosing-the-base-branch-for-new-branches)). Creating a worktree fetches only BRANCH and its base branch from `origin`; an existing worktree is fast-forwarded to its upstream, fetching only that branch, while the `onOpen` hooks run. `--no-fetch` skips both and uses local refs. `--sparse PATHS` and `--full` choose which folders the worktree checks out (see [Sparse checkouts](#sparse-checkouts)) |
 | `grove DIR` | When the argument is an existing directory (e.g. `grove .` or `grove ~/Code/slakkr`), run its `onOpen` recipes in place — equivalent to `cd DIR && grove here` (see [Launching any folder](#launching-any-folder)). A directory path takes precedence over the branch interpretation |
-| `grove open [BRANCH] [TYPES] [--force] [--no-fetch]` | Open BRANCH (or the current worktree's branch if omitted/`.`); `TYPES` (comma-separated) filters the configured hooks to those recipe types; `--force` re-runs the `afterFirstOpen` bucket |
-| `grove switch [BRANCH] [--no-fetch]` | Like a bare BRANCH; with no branch and `fzf` installed, opens a picker |
-| `grove path BRANCH [--from REF] [--no-fetch]` | Resolve (creating if needed) BRANCH's worktree, fast-forwarding an existing one to its upstream, and print its absolute path to stdout |
+| `grove open [BRANCH] [TYPES] [--force] [--no-fetch] [--sparse PATHS \| --full]` | Open BRANCH (or the current worktree's branch if omitted/`.`); `TYPES` (comma-separated) filters the configured hooks to those recipe types; `--force` re-runs the `afterFirstOpen` bucket |
+| `grove switch [BRANCH] [--no-fetch] [--sparse PATHS \| --full]` | Like a bare BRANCH; with no branch and `fzf` installed, opens a picker |
+| `grove path BRANCH [--from REF] [--no-fetch] [--sparse PATHS \| --full]` | Resolve (creating if needed) BRANCH's worktree, fast-forwarding an existing one to its upstream, and print its absolute path to stdout |
 | `grove tmux` | Attach the project's tmux session, building a window for every worktree |
 | `grove list` / `ls [-t] [--porcelain] [--no-status]` | List worktrees with each branch's last commit time and a `*` for local changes; `-t` orders newest first; `--porcelain` prints `branch<TAB>path`; `--no-status` skips the local-changes check (see [Listing large repos](#listing-large-repos)) |
 | `grove prune [--dry-run] [--force] [--keep-branches] [--remote \| --no-remote]` | Remove worktrees whose branches are merged, including squash/rebase merges and detached worktrees whose commits landed, and delete merged branches locally and on `origin` (see [Prune detection](#prune-detection)); never-pushed branches are left alone. A worktree with local changes is kept unless `--force`/`-f` is passed. `--keep-branches` removes only worktrees. `--remote`/`--no-remote` answer the `origin` prompt up front. `--dry-run`/`-n` lists candidates without removing anything |
@@ -583,6 +583,7 @@ autocomplete and inline validation.
 | `hooks` | `{ "onOpen": [{ "type": "tmux" }] }` | The three lifecycle buckets, each an ordered array of recipes (see [Hooks](#hooks)) |
 | `prune` | _(see below)_ | Tunes how `grove prune` decides which branches count as merged (see [Prune detection](#prune-detection)) |
 | `fetch` | `true` | Whether opening a branch contacts `origin`; `false` works from local refs, like `--no-fetch` (see [Choosing the base branch](#choosing-the-base-branch-for-new-branches)) |
+| `sparse` | _(full checkout)_ | Folders new worktrees check out, for large monorepos (see [Sparse checkouts](#sparse-checkouts)) |
 | `list` | `{ "status": true, "statusTimeout": 2 }` | Tunes `grove list`'s local-changes check (see [Listing large repos](#listing-large-repos)) |
 
 When `grove.json` is absent, or its `hooks` key is omitted, grove falls back to
@@ -696,6 +697,46 @@ usually fast again.
 
 Pass `--no-status` to skip the check for a single run. `--porcelain` never runs
 it.
+
+### Sparse checkouts
+
+In a large monorepo where you mostly work in a few folders, set `sparse` so new
+worktrees check out only those folders, using git's cone-mode
+[sparse checkout](https://git-scm.com/docs/git-sparse-checkout). Files at the
+repository root, such as lockfiles and tool configs, are always included.
+
+```jsonc
+"sparse": ["apps/web", "packages/ui"]
+```
+
+Commits, branches, merges, and pull requests still cover the whole repository.
+Only the files on disk are limited, and files outside those folders stay as
+they are in each commit. Include any folders your build, tests, or git hooks
+read from, such as shared packages or a folder of pre-commit scripts. A hook
+that scans the whole working tree for files can't pass in a sparse checkout;
+skip it locally (with pre-commit, `SKIP=hook-id git commit`) and let CI run it.
+
+`sparse` is opt-in, and `grove clone` always checks out the default branch in
+full. The setting applies only when grove creates a worktree, so turning it on
+leaves existing worktrees alone. To override it or reshape a worktree, pass
+these to `grove BRANCH`, `grove open`, `grove switch`, or `grove path`:
+
+- `--sparse PATHS` checks out only `PATHS` (comma-separated, or repeat the
+  flag). On an existing worktree it narrows the checkout only when the
+  worktree has no local changes, so changes are never hidden. Adding folders
+  to a sparse worktree is always allowed.
+- `--full` checks out everything. On an existing sparse worktree it widens it
+  to a full checkout.
+
+```sh
+grove feature/b --from main                   # uses grove.json's "sparse"
+grove feature/b --from main --sparse apps/api # just apps/api this time
+grove feature/b --full                        # widen an existing worktree
+```
+
+Git keeps the sparse setting per worktree. The first sparse worktree turns on
+git's `extensions.worktreeConfig` for the project, which needs Git 2.35 or
+newer.
 
 The only environment input grove reads directly is `GROVE_CD_FILE`, which the
 shell integration sets so the opt-in
