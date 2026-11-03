@@ -1,7 +1,7 @@
 package recipe
 
 import (
-	"slices"
+	"reflect"
 	"testing"
 
 	"grove/internal/config"
@@ -29,7 +29,7 @@ func TestInteractiveOnlySkippedWithoutTerminal(t *testing.T) {
 
 		ran = nil
 		Run(recipes, ctx)
-		if !slices.Equal(ran, want) {
+		if !reflect.DeepEqual(ran, want) {
 			t.Errorf("Run(interactive=%v) ran %v, want %v", interactive, ran, want)
 		}
 
@@ -37,7 +37,7 @@ func TestInteractiveOnlySkippedWithoutTerminal(t *testing.T) {
 		if err := RunBefore(recipes, ctx); err != nil {
 			t.Fatal(err)
 		}
-		if !slices.Equal(ran, want) {
+		if !reflect.DeepEqual(ran, want) {
 			t.Errorf("RunBefore(interactive=%v) ran %v, want %v", interactive, ran, want)
 		}
 	}
@@ -45,10 +45,21 @@ func TestInteractiveOnlySkippedWithoutTerminal(t *testing.T) {
 
 // TestEnvExportsInteractive checks GROVE_INTERACTIVE reflects the context.
 func TestEnvExportsInteractive(t *testing.T) {
-	if !slices.Contains(Context{Interactive: true}.Env(), "GROVE_INTERACTIVE=1") {
+	if !contains(Context{Interactive: true}.Env(), "GROVE_INTERACTIVE=1") {
 		t.Error("interactive context should export GROVE_INTERACTIVE=1")
 	}
-	if !slices.Contains(Context{}.Env(), "GROVE_INTERACTIVE=") {
+	if !contains(Context{}.Env(), "GROVE_INTERACTIVE=") {
 		t.Error("non-interactive context should export an empty GROVE_INTERACTIVE")
 	}
+}
+
+// contains reports whether s holds v (slices.Contains needs Go 1.21; grove
+// supports 1.18).
+func contains(s []string, v string) bool {
+	for _, x := range s {
+		if x == v {
+			return true
+		}
+	}
+	return false
 }
