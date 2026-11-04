@@ -46,8 +46,14 @@
     "prune": {
       "type": "object",
       "additionalProperties": false,
-      "description": "Settings for `grove prune` merge detection.",
+      "description": "Settings for `grove prune` scope and merge detection.",
       "properties": {
+        "scope": {
+          "type": "string",
+          "enum": ["local", "all"],
+          "default": "all",
+          "description": "Limit fetching and origin candidates to branches sharing local branch names or tracked by local branches on origin, plus fetching the default branch (local), or scan all origin branches (all, default). Local scope skips tags and the global pull request mirror, including cached pull heads, but keeps normal merge/squash detection and deletion confirmations. Overridden by --scope."
+        },
         "protect": {
           "type": "array",
           "description": "Branch-name globs prune never removes or deletes, locally or on origin (default: [\"main\", \"master\", \"develop\", \"staging\", \"release*\"]). The default branch is always protected.",
@@ -59,7 +65,7 @@
         },
         "pullRefs": {
           "type": "boolean",
-          "description": "Fetch the head refs forges publish for each pull request (refs/pull/N/head, refs/merge-requests/N/head) into refs/grove/, and treat a branch as merged when a pull request containing its tip landed, by merge or by a squash commit naming it, even if the pull request gained more commits later (default: true). Requires detectSquash."
+          "description": "Fetch the head refs forges publish for each pull request (refs/pull/N/head, refs/merge-requests/N/head) into refs/grove/, and treat a branch as merged when a pull request containing its tip landed, by merge or by a squash commit naming it, even if the pull request gained more commits later (default: true). Requires detectSquash and scope all."
         },
         "forge": {
           "type": "object",

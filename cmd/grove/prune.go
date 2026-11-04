@@ -26,6 +26,12 @@ const (
 )
 
 func cmdPrune(args []string) {
+	p := mustResolve()
+	cfg := loadCfg(p)
+	args, scope, err := resolvePruneScope(args, cfg)
+	if err != nil {
+		ui.Die(err.Error())
+	}
 	args, force := popForce(args)
 	dry, keepBranches, remote := false, false, remoteAsk
 	for _, a := range args {
@@ -40,11 +46,11 @@ func cmdPrune(args []string) {
 			remote = remoteNo
 		}
 	}
-	p := mustResolve()
-	cfg := loadCfg(p)
 	def := p.DefaultBranch()
-	ui.Info("Fetching and pruning remotes...")
-	p.Prune()
+	originNames, err := refreshPrune(p, scope)
+	if err != nil {
+		ui.Die(err.Error())
+	}
 
 	partial := p.IsPartialClone()
 	if cfg.SquashDetectionEnabled() && partial {
@@ -54,7 +60,7 @@ func cmdPrune(args []string) {
 	// Mirror pull request heads so branches older than their squash-merged
 	// request still count; a failed fetch falls back to the last mirror
 	var pulls *pullHeads
-	if cfg.PullRefsEnabled() && !partial {
+	if scope == "all" && cfg.PullRefsEnabled() && !partial {
 		if !p.FetchPullHeads() {
 			ui.Warn("Fetching pull request heads failed; using local state.")
 		}
@@ -72,6 +78,7 @@ func cmdPrune(args []string) {
 		merged:      mergedBranches(p, "origin/"+def),
 		forgeMerged: forgeMerged,
 		pulls:       pulls,
+		originNames: originNames,
 	}
 
 	// Classify every worktree in parallel; each check may run git (squash
@@ -333,6 +340,7 @@ type pruneInputs struct {
 	forgeMerged map[string]string // head branch -> head commit of its merged PR, per the forge
 	pulls       *pullHeads        // fetched pull request heads; nil when that check is off
 	partial     bool
+	originNames []string // nil for all; otherwise only local-related origin names
 }
 
 // reason returns why a worktree is a prune candidate ("merged", "squashed",
@@ -431,6 +439,9 @@ func (in pruneInputs) localBranchCandidates(wts []project.Worktree, remove []pru
 
 // originBranchCandidates returns origin's merged branches, labeled origin/<name>.
 func (in pruneInputs) originBranchCandidates() []pruneCandidate {
+	if in.originNames != nil {
+		return in.scopedOriginBranchCandidates()
+	}
 	names := in.p.OriginBranches()
 	merged := mergedOriginBranches(in.p, "origin/"+in.def)
 	reasons := make([]string, len(names))
