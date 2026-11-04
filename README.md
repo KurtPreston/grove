@@ -139,7 +139,7 @@ for when and why to enable the recipe.
 | `grove path BRANCH [--from REF] [--no-fetch] [--sparse PATHS \| --full]` | Resolve (creating if needed) BRANCH's worktree, fast-forwarding an existing one to its upstream, and print its absolute path to stdout |
 | `grove tmux` | Attach the project's tmux session, building a window for every worktree |
 | `grove list` / `ls [-t] [--porcelain] [--no-status]` | List worktrees with each branch's last commit time and a `*` for local changes; `-t` orders newest first; `--porcelain` prints `branch<TAB>path`; `--no-status` skips the local-changes check (see [Listing large repos](#listing-large-repos)) |
-| `grove prune [--dry-run] [--force] [--keep-branches] [--remote \| --no-remote]` | Remove worktrees whose branches are merged, including squash/rebase merges and detached worktrees whose commits landed, and delete merged branches locally and on `origin` (see [Prune detection](#prune-detection)); never-pushed branches are left alone. A worktree with local changes is kept unless `--force`/`-f` is passed. `--keep-branches` removes only worktrees. `--remote`/`--no-remote` answer the `origin` prompt up front. `--dry-run`/`-n` lists candidates without removing anything |
+| `grove prune [--dry-run] [--force] [--keep-branches] [--remote \| --no-remote] [--scope local\|all]` | Remove worktrees whose branches are merged, including squash/rebase merges and detached worktrees whose commits landed, and delete merged branches locally and on `origin` (see [Prune detection](#prune-detection)); never-pushed branches are left alone. A worktree with local changes is kept unless `--force`/`-f` is passed. `--scope local` limits fetching and origin checks to local-related branches. `--keep-branches` removes only worktrees. `--remote`/`--no-remote` answer the `origin` prompt up front. `--dry-run`/`-n` lists candidates without removing anything |
 | `grove rm BRANCH [--force]` | Remove a single worktree (keeps the branch ref); `--force` discards local changes |
 | `grove color BRANCH` | Print the deterministic color for a branch |
 | `grove launch` / `here [DIR]` | Run the `onOpen` recipes for `DIR` (or cwd) without a worktree — from the project's `grove.json` inside a grove project, otherwise from the user-level config (see [Launching any folder](#launching-any-folder)) |
@@ -639,11 +639,44 @@ The default branch is never pruned, and neither is any branch matching a
 `release*`). Those branches are often ancestors of the default branch — a
 release branch cut with no new commits yet — without being finished work.
 
-The optional `prune` block tunes the squash and forge checks and the protected
+#### Limiting prune on large repositories
+
+By default (`--scope all`), prune fetches all origin branches, mirrors pull
+request heads when enabled, and checks every origin branch. For large shared
+repositories, limit cleanup to your local work:
+
+```sh
+grove prune --scope local --dry-run
+grove prune --scope local
+```
+
+Local scope still checks all local branches and worktrees, including detached
+worktrees. It fetches and checks only origin branches sharing a local branch's
+name or configured as a local branch's origin upstream (even with a different
+name). The default branch is also fetched for merge detection but never deleted.
+Missing selected branches have their stale origin tracking refs pruned; unrelated
+origin refs are left alone. It does not fetch tags or mirror pull request heads,
+and does not consult previously mirrored heads, even with `pullRefs: true`.
+
+Normal ancestry and squash/rebase detection remain enabled, along with the
+optional forge check. Some merged branches may be kept when recognizing their
+squash merge requires later commits from a pull request; use `--scope all` for
+that broader detection. Dirty-worktree protection, protected branches, and
+deletion confirmations are unchanged. `--remote` authorizes deletion only
+within the selected scope; `--no-remote` still skips origin deletion candidates.
+As with full scope, `--dry-run` refreshes tracking refs but removes no worktrees
+or local/remote branches.
+
+Set `"prune": { "scope": "local" }` in your project config to make this the
+default. `--scope local` or `--scope all` overrides it for one run; `--scope=local`
+and `--scope=all` are also accepted.
+
+The optional `prune` block tunes the scope, squash and forge checks, and protected
 branches:
 
 ```jsonc
 "prune": {
+  "scope": "all",                 // default; "local" limits fetching and origin checks to local-related branches
   "detectSquash": true,           // default; set false to disable patch-equivalence detection
   "pullRefs": true,               // default; set false to skip fetching pull request heads
   "forge": {
@@ -665,10 +698,10 @@ request's net diff. A matching diff alone isn't enough, since an open request
 can match an unrelated upstream change by chance. This catches a branch whose
 squashed diff no longer matches because review fixes were pushed from
 elsewhere. A squash whose message doesn't name its request isn't recognized. A
-remote that publishes no such refs fetches nothing. The check runs only with squash
-detection on and is skipped on partial clones. The first fetch downloads every
-pull request's commits, which can be large on a repository with thousands of
-them; set `"pullRefs": false` to skip it.
+remote that publishes no such refs fetches nothing. The check runs only with
+squash detection on and is skipped on partial clones and in local scope. The first
+fetch downloads every pull request's commits, which can be large on a repository
+with thousands of them; set `"pullRefs": false` to skip it.
 
 The forge check runs one `gh pr list --state merged` query and treats any branch
 matching a merged PR's head as a candidate, as long as the branch hasn't moved

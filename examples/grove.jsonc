@@ -52,7 +52,9 @@
   // Tune `grove prune` merge detection. Squash/rebase detection, including a check
   // of the pull request heads the forge publishes, is on by default; enable
   // "forge" to also treat branches with a merged PR (via the gh CLI) as prunable.
-  // "prune": { "detectSquash": true, "pullRefs": true, "forge": { "enabled": false } },
+  // Use "scope": "local" on large repos to fetch/check only local-related origin
+  // branches and skip the global pull request mirror. --scope overrides it.
+  // "prune": { "scope": "all", "detectSquash": true, "pullRefs": true, "forge": { "enabled": false } },
 
   // Tune `grove list`'s local-changes column, which runs `git status` in every
   // worktree. Rows still pending after statusTimeout seconds show "?"; on a very
