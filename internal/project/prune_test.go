@@ -58,11 +58,12 @@ func TestPruneLocal(t *testing.T) {
 	runGit(t, clone, "branch", "deleted")
 	runGit(t, clone, "update-ref", "refs/remotes/origin/deleted", "HEAD")
 	runGit(t, clone, "update-ref", "refs/remotes/origin/other-deleted", "HEAD")
+	runGit(t, clone, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main")
 	names, err := p.LocalOriginBranches()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := p.PruneLocal(names, "main"); err != nil {
+	if err := p.PruneLocal(append(names, "HEAD"), "main"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -86,6 +87,9 @@ func TestPruneLocal(t *testing.T) {
 	}
 	if !GitQuiet(p.Base, "--git-dir=.", "show-ref", "--verify", "refs/remotes/origin/other-deleted") {
 		t.Error("pruned unrelated tracking ref")
+	}
+	if !GitQuiet(p.Base, "--git-dir=.", "symbolic-ref", "refs/remotes/origin/HEAD") {
+		t.Error("removed origin/HEAD alias")
 	}
 }
 

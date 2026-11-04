@@ -39,7 +39,7 @@ func (p *Project) LocalOriginBranches() ([]string, error) {
 func (p *Project) PruneLocal(names []string, def string) error {
 	seen := map[string]bool{}
 	for _, name := range append([]string{def}, names...) {
-		if seen[name] {
+		if seen[name] || name == "HEAD" {
 			continue
 		}
 		seen[name] = true
@@ -49,7 +49,7 @@ func (p *Project) PruneLocal(names []string, def string) error {
 		}
 		if !exists {
 			ref := "refs/remotes/origin/" + name
-			if err := Git(p.Base, "--git-dir=.", "update-ref", "-d", ref); err != nil {
+			if err := Git(p.Base, "--git-dir=.", "update-ref", "--no-deref", "-d", ref); err != nil {
 				return fmt.Errorf("prune %s: %w", ref, err)
 			}
 		}

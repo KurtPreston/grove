@@ -726,10 +726,11 @@ Usage:
                                  List worktrees with last commit time and local changes (*);
                                  -t newest first; --porcelain prints branch<TAB>path;
                                  --no-status skips the local-changes check
-  grove prune [--dry-run] [--force] [--keep-branches] [--remote | --no-remote]
+  grove prune [--dry-run] [--force] [--keep-branches] [--remote | --no-remote] [--scope local|all]
                                  Remove merged worktrees and delete merged branches, locally and
                                  (after asking) on origin; worktrees with local changes are kept
-                                 unless --force discards them; --keep-branches only removes worktrees
+                                 unless --force discards them; --keep-branches only removes worktrees;
+                                 --scope local limits fetching/checks to local-related origin branches
   grove rm BRANCH [--force]      Remove a single worktree (keeps branch ref); --force discards local changes
   grove color BRANCH             Print the deterministic color for BRANCH
   grove launch | here [DIR]      Run user-level recipes for DIR (or cwd) without a worktree

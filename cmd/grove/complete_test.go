@@ -75,10 +75,28 @@ func TestCompleteOutsideProject(t *testing.T) {
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git not available")
 	}
+
 	// `grove DIR` works anywhere, so paths are still on offer; branches are not.
 	out := captureComplete(t, t.TempDir(), "sa")
 	if out != pathSentinel {
 		t.Fatalf("expected only %q outside a grove project, got %q", pathSentinel, out)
+	}
+}
+
+func TestCompletePruneScope(t *testing.T) {
+	for _, tc := range []struct {
+		args []string
+		want string
+	}{
+		{[]string{"prune", "--sc"}, "--scope"},
+		{[]string{"prune", "--scope", ""}, "local\nall"},
+		{[]string{"prune", "--scope", "l"}, "local"},
+		{[]string{"prune", "--scope=a"}, "--scope=all"},
+		{[]string{"prune", "--scope", "local", "--dr"}, "--dry-run"},
+	} {
+		if got := captureComplete(t, t.TempDir(), tc.args...); got != tc.want {
+			t.Errorf("completion %v = %q, want %q", tc.args, got, tc.want)
+		}
 	}
 }
 

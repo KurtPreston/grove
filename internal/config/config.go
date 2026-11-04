@@ -137,6 +137,9 @@ type Hooks struct {
 // PruneConfig holds the settings `grove prune` uses to decide which worktrees'
 // branches count as merged.
 type PruneConfig struct {
+	// Scope limits fetching and origin candidates to local-related branches
+	// when set to "local". Omitted means "all".
+	Scope *string `json:"scope,omitempty"`
 	// DetectSquash enables patch-equivalence detection of squash/rebase merges
 	// (branches whose tip is not an ancestor of origin/default). Defaults to true
 	// when nil.

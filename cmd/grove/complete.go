@@ -36,7 +36,7 @@ var completeFlags = map[string][]string{
 	"switch": {"--force", "-f", "--from", "--no-fetch", "--sparse", "--full"},
 	"sw":     {"--force", "-f", "--from", "--no-fetch", "--sparse", "--full"},
 	"path":   {"--from", "--no-fetch", "--sparse", "--full"},
-	"prune":  {"--dry-run", "-n", "--force", "-f", "--keep-branches", "--remote", "--no-remote"},
+	"prune":  {"--dry-run", "-n", "--force", "-f", "--keep-branches", "--remote", "--no-remote", "--scope"},
 	"rm":     {"--force", "-f"},
 	"remove": {"--force", "-f"},
 	"list":   {"--porcelain", "-t", "--time", "--no-status"},
@@ -53,6 +53,17 @@ func cmdComplete(args []string) {
 	}
 	cur := args[len(args)-1]
 	prior := args[:len(args)-1]
+
+	if len(prior) > 0 && prior[0] == "prune" {
+		if prior[len(prior)-1] == "--scope" {
+			printCompleteFiltered([]string{"local", "all"}, cur)
+			return
+		}
+		if strings.HasPrefix(cur, "--scope=") {
+			printCompleteFiltered([]string{"--scope=local", "--scope=all"}, cur)
+			return
+		}
+	}
 
 	if len(prior) > 0 && prior[len(prior)-1] == "--from" {
 		printCompleteBranches(cur)
@@ -110,7 +121,7 @@ func parseCompleteWords(words []string) (cmd string, argIdx int, positional []st
 	i := 0
 	for i < len(words) {
 		w := words[i]
-		if w == "--from" || w == "--sparse" {
+		if w == "--from" || w == "--sparse" || w == "--scope" {
 			i += 2
 			continue
 		}
