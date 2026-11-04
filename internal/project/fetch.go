@@ -1,6 +1,7 @@
 package project
 
 import (
+	"fmt"
 	"os/exec"
 	"strings"
 
@@ -38,6 +39,13 @@ func (f *originFetcher) branch(name string) {
 // fetch refspec is, and --no-tags keeps git from also downloading every tag
 // that points into the fetched history.
 func fetchOriginBranch(base, name string) bool {
+	_, err := fetchOriginBranchState(base, name)
+	return err == nil
+}
+
+// fetchOriginBranchState distinguishes a missing branch from a failed fetch so
+// scoped prune can remove stale tracking refs without a wildcard refspec.
+func fetchOriginBranchState(base, name string) (bool, error) {
 	ref := "refs/heads/" + name
 	refspec := "+" + ref + ":refs/remotes/origin/" + name
 	ui.Info("Fetching '" + name + "' from origin...")
@@ -49,8 +57,12 @@ func fetchOriginBranch(base, name string) bool {
 	cmd.Env = append(gitBaseEnv(), "LC_ALL=C")
 	var stderr strings.Builder
 	cmd.Stderr = &stderr
-	if cmd.Run() == nil {
-		return true
+	err := cmd.Run()
+	if err == nil {
+		return true, nil
 	}
-	return strings.Contains(stderr.String(), "couldn't find remote ref "+ref)
+	if strings.Contains(stderr.String(), "couldn't find remote ref "+ref+"\n") {
+		return false, nil
+	}
+	return false, fmt.Errorf("fetch %s: %w: %s", name, err, strings.TrimSpace(stderr.String()))
 }
