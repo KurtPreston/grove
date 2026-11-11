@@ -3,6 +3,7 @@ package builtin
 import (
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 
 	"grove/internal/config"
@@ -38,7 +39,7 @@ func commandRecipe(ctx recipe.Context, rc config.RecipeConfig) error {
 
 	ui.Info("command: running configured command")
 	// -l = login shell, so profile/rc files (and thus nvm etc.) are sourced.
-	cmd := exec.Command(shell, "-l", "-c", rc.Command)
+	cmd := exec.Command(shell, "-l", "-c", restoreCallerPath(shell)+rc.Command)
 	// A beforeCreateBranch command runs before the worktree directory exists:
 	// ctx.Dir is the planned (not-yet-real) path, so it isn't a valid cwd yet.
 	// Fall back to the project root in that case.
@@ -46,11 +47,33 @@ func commandRecipe(ctx recipe.Context, rc config.RecipeConfig) error {
 	if fi, err := os.Stat(cmd.Dir); err != nil || !fi.IsDir() {
 		cmd.Dir = ctx.ProjectDir
 	}
-	cmd.Env = sanitizeLaunchEnv(ctx.Env())
+	cmd.Env = append(sanitizeLaunchEnv(ctx.Env()), callerPathVar+"="+os.Getenv("PATH"))
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stderr
 	cmd.Stderr = os.Stderr
 	return cmd.Run()
+}
+
+// callerPathVar carries grove's own PATH into the login shell so
+// restoreCallerPath can put it back in front.
+const callerPathVar = "GROVE_CALLER_PATH"
+
+// restoreCallerPath returns a prefix for a command recipe that puts the PATH
+// grove was launched with ahead of whatever the login shell's profiles built.
+// A login shell can reorder PATH — macOS's /etc/profile runs path_helper,
+// which moves the system and Homebrew directories ahead of the user's own —
+// so without this a command like `zed $GROVE_DIR` can resolve to a different
+// binary than the one the same command finds in the user's terminal (e.g.
+// /opt/homebrew/bin/zed instead of a wrapper in ~/.local/bin). Directories the
+// profiles add (nvm, asdf, …) stay on PATH, after the caller's.
+func restoreCallerPath(shell string) string {
+	if os.Getenv("PATH") == "" {
+		return ""
+	}
+	if filepath.Base(shell) == "fish" {
+		return "set -gx PATH (string split : -- $" + callerPathVar + ") $PATH; "
+	}
+	return `export PATH="$` + callerPathVar + `:$PATH"; `
 }
 
 // cliEnvAllowlist is the set of VSCODE_-prefixed variables that must survive

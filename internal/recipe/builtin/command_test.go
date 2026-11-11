@@ -1,7 +1,13 @@
 package builtin
 
 import (
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
+
+	"grove/internal/config"
+	"grove/internal/recipe"
 )
 
 func equalStrings(a, b []string) bool {
@@ -71,5 +77,31 @@ func TestSanitizeLaunchEnvHandlesKeyOnly(t *testing.T) {
 	want := []string{"SOMETHING_ELSE"}
 	if !equalStrings(got, want) {
 		t.Fatalf("got %v want %v", got, want)
+	}
+}
+
+// A login shell's profiles may reorder PATH (macOS path_helper, Debian's
+// /etc/profile), so the command must see grove's own PATH first or a tool can
+// resolve to a different binary than in the user's terminal.
+func TestCommandRecipeKeepsCallerPathFirst(t *testing.T) {
+	dir := t.TempDir()
+	callerPath := dir + string(os.PathListSeparator) + os.Getenv("PATH")
+	t.Setenv("PATH", callerPath)
+
+	// Record the PATH the command sees
+	out := filepath.Join(dir, "path.txt")
+	ctx := recipe.Context{Dir: dir, ProjectDir: dir}
+	rc := config.RecipeConfig{Command: `printf %s "$PATH" > ` + out}
+	if err := commandRecipe(ctx, rc); err != nil {
+		t.Fatal(err)
+	}
+
+	// The caller's PATH must lead, ahead of anything the profiles prepended
+	got, err := os.ReadFile(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(string(got), callerPath) {
+		t.Fatalf("PATH in command = %q, want prefix %q", got, callerPath)
 	}
 }

@@ -324,7 +324,10 @@ Notes:
 - The command runs through a **login shell** (`bash -l` by default) so your
   shell environment is sourced — that is what makes shell functions like `nvm
   use` work in a non-interactive run. Override the interpreter with the
-  recipe's `shell` field (e.g. `"shell": "zsh"`).
+  recipe's `shell` field (e.g. `"shell": "zsh"`). The `PATH` grove was
+  launched with is put back in front after the profiles run, so a command
+  finds the same binaries it does in your terminal (macOS's `path_helper`
+  otherwise moves system and Homebrew directories ahead of yours).
 - It runs in the **worktree directory**, except for a `beforeCreateBranch`
   entry — the worktree doesn't exist yet there, so it runs in the **project
   root** (`$GROVE_PROJECT_DIR`) instead.
