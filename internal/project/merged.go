@@ -24,6 +24,7 @@ func (p *Project) Prune() {
 // branch and into, then asks `git cherry` whether that combined diff is already
 // upstream: a leading "-" means an equivalent patch exists in into. The
 // synthesized commit is dangling (no ref points at it) and is reclaimed by gc.
+// When the patches differ only in context, landedIn finds the landing commit.
 func (p *Project) BranchSquashMerged(branch, into string) bool {
 	base, err := GitOut(p.Base, "--git-dir=.", "merge-base", into, branch)
 	if err != nil {
@@ -53,7 +54,93 @@ func (p *Project) BranchSquashMerged(branch, into string) bool {
 	if err != nil {
 		return false
 	}
-	return strings.HasPrefix(strings.TrimSpace(out), "-")
+	if strings.HasPrefix(strings.TrimSpace(out), "-") {
+		return true
+	}
+	return p.landedIn(branch, into, base)
+}
+
+// Bounds on the landing-commit search, so a branch whose files main touches
+// constantly can't make prune walk all of history
+const (
+	maxLandingFiles      = 500
+	maxLandingCandidates = 50
+)
+
+// landedIn reports whether a commit on into since base already holds all of
+// branch's changes: merging branch into it (git merge-tree) yields that
+// commit's own tree. It catches a squash whose diff carries different context
+// than the branch's, because into changed nearby lines before the merge, where
+// the patch IDs `git cherry` compares never match. Merging into the landing
+// commit rather than into's tip keeps later edits to the same lines from
+// conflicting.
+//
+// Only commits touching every file the branch changed can hold all of it, so
+// only those are tried, oldest first, up to maxLandingCandidates. It needs git
+// 2.38 or later for merge-tree --write-tree, and reports false on older ones.
+func (p *Project) landedIn(branch, into, base string) bool {
+	// Files the branch changed since it forked
+	out, err := GitOut(p.Base, "--git-dir=.", "-c", "core.quotePath=false", "diff", "--name-only", "--no-renames", base, branch, "--")
+	files := nonEmptyLines(out)
+	if err != nil || len(files) == 0 || len(files) > maxLandingFiles {
+		return false
+	}
+
+	// Commits since the fork touching every one of those files
+	for _, c := range p.landingCandidates(base, into, files) {
+		merged, err := GitOut(p.Base, "--git-dir=.", "merge-tree", "--write-tree", "--no-messages", c.commit, branch)
+		if err == nil && strings.TrimSpace(merged) == c.tree {
+			return true
+		}
+	}
+	return false
+}
+
+// landingCommit is a commit that could have landed a branch, with its tree.
+type landingCommit struct{ commit, tree string }
+
+// landingCandidates lists the non-merge commits in base..into that touch every
+// one of files, oldest first and at most maxLandingCandidates of them.
+func (p *Project) landingCandidates(base, into string, files []string) []landingCommit {
+	args := []string{"--git-dir=.", "-c", "core.quotePath=false", "log", "--no-merges", "--no-renames",
+		"--name-only", "--format=%x01%H %T", base + ".." + into, "--"}
+	out, err := GitOut(p.Base, append(args, files...)...)
+	if err != nil {
+		return nil
+	}
+
+	// Each record is "<commit> <tree>" followed by the files it touched
+	var found []landingCommit
+	for _, rec := range strings.Split(out, "\x01") {
+		lines := nonEmptyLines(rec)
+		if len(lines) == 0 {
+			continue
+		}
+		head := strings.Fields(lines[0])
+		if len(head) != 2 {
+			continue
+		}
+		touched := map[string]bool{}
+		for _, f := range lines[1:] {
+			touched[f] = true
+		}
+		all := true
+		for _, f := range files {
+			all = all && touched[f]
+		}
+		if all {
+			found = append(found, landingCommit{commit: head[0], tree: head[1]})
+		}
+	}
+
+	// git log lists newest first; the landing commit is usually among the oldest
+	for i, j := 0, len(found)-1; i < j; i, j = i+1, j-1 {
+		found[i], found[j] = found[j], found[i]
+	}
+	if len(found) > maxLandingCandidates {
+		found = found[:maxLandingCandidates]
+	}
+	return found
 }
 
 // CommitMerged reports whether rev is an ancestor of into (e.g. "origin/main").
@@ -106,4 +193,15 @@ func (p *Project) SubjectsUpstream(head, into string) bool {
 		}
 	}
 	return true
+}
+
+// nonEmptyLines splits git output into its non-blank lines.
+func nonEmptyLines(out string) []string {
+	var lines []string
+	for _, l := range strings.Split(out, "\n") {
+		if l != "" {
+			lines = append(lines, l)
+		}
+	}
+	return lines
 }

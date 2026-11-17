@@ -262,6 +262,23 @@ func TestBranchSquashMerged(t *testing.T) {
 	runGit(t, base, "checkout", "-q", "main")
 	runGit(t, base, "cherry-pick", "feat-partial~1")
 
+	// Context moved: main edits a line within the branch's diff context before the
+	// squash lands, then edits the branch's own line again, so neither the
+	// squash's patch ID nor a merge into main's tip matches the branch.
+	commitFile(t, base, "ctx file.txt", "a\nb\nc\nd\ne\nf\ng\n", "add ctx")
+	runGit(t, base, "checkout", "-q", "-b", "feat-moved")
+	commitFile(t, base, "ctx file.txt", "a\nb\nc\nd\nE\nf\ng\n", "edit e")
+	runGit(t, base, "checkout", "-q", "main")
+	commitFile(t, base, "ctx file.txt", "a\nb\nC\nd\ne\nf\ng\n", "edit c")
+	runGit(t, base, "merge", "-q", "--squash", "feat-moved")
+	runGit(t, base, "commit", "-q", "-m", "edit e (#5)")
+	commitFile(t, base, "ctx file.txt", "a\nb\nC\nd\nE2\nf\ng\n", "edit e again")
+
+	// Context moved, but the branch has a change the squash never carried
+	runGit(t, base, "checkout", "-q", "-b", "feat-moved-extra", "main~3")
+	commitFile(t, base, "ctx file.txt", "a\nb\nc\nd\nE\nf\ng\n", "edit e")
+	commitFile(t, base, "extra.txt", "x", "extra")
+
 	runGit(t, base, "checkout", "-q", "main")
 
 	cases := []struct {
@@ -272,6 +289,8 @@ func TestBranchSquashMerged(t *testing.T) {
 		{"feat-rebase", true},
 		{"feat-open", false},
 		{"feat-partial", false},
+		{"feat-moved", true},
+		{"feat-moved-extra", false},
 	}
 	for _, c := range cases {
 		if got := p.BranchSquashMerged(c.branch, "main"); got != c.want {
