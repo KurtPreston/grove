@@ -63,6 +63,11 @@ func (p *Project) CommitMerged(rev, into string) bool {
 	return GitQuiet(p.Base, "--git-dir=.", "merge-base", "--is-ancestor", rev, into)
 }
 
+// HasCommit reports whether the commit named by oid is in the repository.
+func (p *Project) HasCommit(oid string) bool {
+	return GitQuiet(p.Base, "--git-dir=.", "cat-file", "-e", oid+"^{commit}")
+}
+
 // prSuffix matches the " (#123)" that forges append to a squash commit's subject.
 var prSuffix = regexp.MustCompile(`\s+\(#\d+\)$`)
 

@@ -660,8 +660,9 @@ and does not consult previously mirrored heads, even with `pullRefs: true`.
 
 Normal ancestry and squash/rebase detection remain enabled, along with the
 optional forge check. Some merged branches may be kept when recognizing their
-squash merge requires later commits from a pull request; use `--scope all` for
-that broader detection. Dirty-worktree protection, protected branches, and
+squash merge requires later commits from a pull request; enable the forge check,
+which fetches only the merged requests of local branches, or use `--scope all`
+for that broader detection. Dirty-worktree protection, protected branches, and
 deletion confirmations are unchanged. `--remote` authorizes deletion only
 within the selected scope; `--no-remote` still skips origin deletion candidates.
 As with full scope, `--dry-run` refreshes tracking refs but removes no worktrees
@@ -703,13 +704,20 @@ squash detection on and is skipped on partial clones and in local scope. The fir
 fetch downloads every pull request's commits, which can be large on a repository
 with thousands of them; set `"pullRefs": false` to skip it.
 
-The forge check runs one `gh pr list --state merged` query and treats any branch
-matching a merged PR's head as a candidate, as long as the branch hasn't moved
-past the PR's head commit. It requires `gh` on `PATH` and
-authentication for the remote's host; if `gh` is missing, the repo can't be
-resolved, or the query fails, grove warns once and falls back to the git-only
-checks. Run `grove prune --dry-run` to preview candidates (with their reason)
-without removing anything.
+The forge check runs one `gh pr list --state merged` query for the repository's
+200 most recent merges into the default branch, plus one per local branch name (and, in local scope, per
+selected origin name), so a branch merged long ago on a busy repository is still
+found. It fetches the head of each merged request found by name that isn't
+local yet into `refs/grove/pull/N`, since forges usually delete a branch on
+merge. A branch is a candidate when its tip is inside one of those merged
+requests: an ancestor of, or equal to, the request's head. Requests merged into
+another branch, such as the lower layer of a stack, don't count. That catches a branch
+whose request gained review fixes or `main` merges pushed from elsewhere, and
+never counts commits added after the merge or a reused branch name. It requires
+`gh` on `PATH` and authentication for the remote's host; if `gh` is missing, the
+repo can't be resolved, or the query fails, grove warns once and falls back to
+the git-only checks. Run `grove prune --dry-run` to preview candidates (with
+their reason) without removing anything.
 
 ### Listing large repos
 

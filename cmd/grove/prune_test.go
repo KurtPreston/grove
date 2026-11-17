@@ -153,7 +153,7 @@ func TestPruneReason(t *testing.T) {
 		w           project.Worktree
 		cwd         string
 		cfg         config.Config
-		forgeMerged map[string]string
+		forgeMerged map[string][]forgePR
 		partial     bool
 		want        string
 	}{
@@ -162,8 +162,9 @@ func TestPruneReason(t *testing.T) {
 		{"never-pushed upstream kept", wt("feat-unpushed"), otherCwd, std, nil, false, ""},
 		{"upstream present kept", wt("feat-upstream"), otherCwd, std, nil, false, ""},
 		{"open unmerged kept", wt("feat-open"), otherCwd, std, nil, false, ""},
-		{"forge merged", wt("feat-open"), otherCwd, std, map[string]string{"feat-open": openHead}, false, "forge"},
-		{"forge merged before newer commits kept", wt("feat-open"), otherCwd, std, map[string]string{"feat-open": c0}, false, ""},
+		{"forge merged", wt("feat-open"), otherCwd, std, map[string][]forgePR{"feat-open": {{Number: 3, HeadRefOid: openHead}}}, false, "forge"},
+		{"forge merged before newer commits kept", wt("feat-open"), otherCwd, std, map[string][]forgePR{"feat-open": {{Number: 2, HeadRefOid: c0}}}, false, ""},
+		{"forge merged by any request reusing the name", wt("feat-open"), otherCwd, std, map[string][]forgePR{"feat-open": {{Number: 2, HeadRefOid: c0}, {Number: 3, HeadRefOid: openHead}}}, false, "forge"},
 		{"protected branch kept", wt("release-1"), otherCwd, std, nil, false, ""},
 		{"protect overridable", wt("release-1"), otherCwd, config.Config{Prune: &config.PruneConfig{Protect: []string{}}}, nil, false, "merged"},
 		{"squash detection disabled", wt("feat-squash"), otherCwd, squashOff(), nil, false, ""},
