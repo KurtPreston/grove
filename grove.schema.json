@@ -61,7 +61,7 @@
         },
         "detectSquash": {
           "type": "boolean",
-          "description": "Detect squash/rebase-merged branches via patch-equivalence against origin/<default> (default: true)."
+          "description": "Detect squash/rebase-merged branches via patch-equivalence against origin/<default>, falling back to finding a commit there that merging the branch into leaves unchanged (default: true)."
         },
         "pullRefs": {
           "type": "boolean",

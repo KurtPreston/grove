@@ -601,7 +601,12 @@ candidate when its branch is:
 - **merged** — an ancestor of `origin/<default>` (`git branch --merged`);
 - **squashed** — its net diff already exists in `origin/<default>`, detected via
   patch-equivalence so squash- and rebase-merged branches are caught even though
-  their tips are not ancestors (on by default);
+  their tips are not ancestors (on by default). When the patches differ because
+  `origin/<default>` changed nearby lines before the squash landed, prune also
+  tries each commit since the branch forked that touches all of the branch's
+  files (up to 50, oldest first): if merging the branch into that commit
+  (`git merge-tree`, git 2.38+) changes nothing, the branch's work is already
+  there;
 - **pr #N** — every commit on it is part of a pull request that was merged or
   squash-merged, even if the request gained more commits after the branch was
   last fetched or was superseded by a later request (on by default; see below);
