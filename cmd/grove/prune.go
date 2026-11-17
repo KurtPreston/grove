@@ -1,10 +1,8 @@
 package main
 
 import (
-	"encoding/json"
 	"fmt"
 	"os"
-	"os/exec"
 	"strings"
 	"sync"
 
@@ -69,16 +67,14 @@ func cmdPrune(args []string) {
 
 	wts, _ := p.Worktrees()
 	cwd := mustGetwd()
-	var forgeMerged map[string]string
-	if cfg.ForgeEnabled() {
-		forgeMerged = forgeMergedBranches(p, cfg)
-	}
 	in := pruneInputs{
 		p: p, def: def, cwd: cwd, cfg: cfg, partial: partial,
 		merged:      mergedBranches(p, "origin/"+def),
-		forgeMerged: forgeMerged,
 		pulls:       pulls,
 		originNames: originNames,
+	}
+	if cfg.ForgeEnabled() {
+		in.forgeMerged = in.forgeMergedBranches()
 	}
 
 	// Classify every worktree in parallel; each check may run git (squash
@@ -336,9 +332,9 @@ type pruneInputs struct {
 	p           *project.Project
 	def, cwd    string
 	cfg         config.Config
-	merged      map[string]bool   // branches whose tips are ancestors of origin/<def>
-	forgeMerged map[string]string // head branch -> head commit of its merged PR, per the forge
-	pulls       *pullHeads        // fetched pull request heads; nil when that check is off
+	merged      map[string]bool      // branches whose tips are ancestors of origin/<def>
+	forgeMerged map[string][]forgePR // head branch -> its merged PRs, per the forge
+	pulls       *pullHeads           // fetched pull request heads; nil when that check is off
 	partial     bool
 	originNames []string // nil for all; otherwise only local-related origin names
 }
@@ -377,11 +373,9 @@ func (in pruneInputs) refReason(name, ref string, ancestor bool) string {
 	if cfg.SquashDetectionEnabled() && !in.partial && p.BranchSquashMerged(ref, into) {
 		return "squashed"
 	}
-	// Authoritative merged-PR state from the forge, when configured. The branch
-	// must not have moved past the PR's head, so commits added after the merge
-	// (or a reused branch name) never count as landed.
-	if head, ok := in.forgeMerged[name]; ok && head != "" && p.CommitMerged(ref, head) {
-		return "forge"
+	// Authoritative merged-PR state from the forge, when configured
+	if r := in.forgeReason(name, ref); r != "" {
+		return r
 	}
 	// A pull request can gain commits after a branch's last fetch, or be
 	// superseded by a later one, so its squash no longer matches the branch's
@@ -534,52 +528,6 @@ func (h *pullHeads) headLanded(ref string) bool {
 	h.landed[ref] = landed
 	h.mu.Unlock()
 	return landed
-}
-
-// forgeMergedBranches maps each merged PR's head-branch name to its head commit,
-// according to the forge (via gh). It returns nil (warning once) when the repo
-// can't be resolved, gh is unavailable, or the query fails, so prune falls back
-// to git-only detection.
-func forgeMergedBranches(p *project.Project, cfg config.Config) map[string]string {
-	repo := cfg.ForgeRepo()
-	if repo == "" {
-		repo = p.OriginRepoSlug()
-	}
-	if repo == "" {
-		ui.Warn("prune.forge: could not determine origin repo; skipping forge check.")
-		return nil
-	}
-	if _, err := exec.LookPath("gh"); err != nil {
-		ui.Warn("prune.forge: gh not found on PATH; skipping forge check.")
-		return nil
-	}
-	out, err := exec.Command("gh", "pr", "list",
-		"--repo", repo,
-		"--state", "merged",
-		"--limit", "200",
-		"--json", "headRefName,headRefOid",
-	).Output()
-	if err != nil {
-		ui.Warn("prune.forge: 'gh pr list' failed; skipping forge check.")
-		return nil
-	}
-	var prs []struct {
-		HeadRefName string `json:"headRefName"`
-		HeadRefOid  string `json:"headRefOid"`
-	}
-	if err := json.Unmarshal(out, &prs); err != nil {
-		ui.Warn("prune.forge: could not parse gh output; skipping forge check.")
-		return nil
-	}
-
-	// gh lists newest first, so the first PR seen for a branch name wins
-	merged := make(map[string]string, len(prs))
-	for _, pr := range prs {
-		if _, seen := merged[pr.HeadRefName]; pr.HeadRefName != "" && !seen {
-			merged[pr.HeadRefName] = pr.HeadRefOid
-		}
-	}
-	return merged
 }
 
 // mergedBranches returns the local branches whose tips are reachable from into,
